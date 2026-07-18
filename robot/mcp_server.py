@@ -12,12 +12,11 @@ import base64
 import subprocess
 from pathlib import Path
 
-from fastmcp import FastMCP
-from picrawler_ctl import get_controller
-
 APP_DIR = Path(os.path.expanduser("~/picrawler-app")).resolve()
 
-# ---- load .env (simple parser; avoids extra deps) ------------------------
+# ---- load .env BEFORE importing picrawler_ctl -----------------------------
+# picrawler_ctl reads PICRAWLER_MIN/WARN_BATTERY_V from os.environ at import
+# time, so the .env must be applied first or those overrides are ignored.
 _env = APP_DIR / ".env"
 if _env.exists():
     for _line in _env.read_text().splitlines():
@@ -26,13 +25,25 @@ if _env.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
 
+from fastmcp import FastMCP  # noqa: E402
+from picrawler_ctl import get_controller  # noqa: E402
+
 # ---- build server (auth decided at construction time in v3) ---------------
 _token = os.environ.get("MCP_AUTH_TOKEN", "").strip()
 if _token:
-    try:
-        from fastmcp.server.auth import StaticTokenVerifier
-    except ImportError:  # older/newer layout
-        from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
+    StaticTokenVerifier = None
+    for _modpath in ("fastmcp.server.auth",
+                     "fastmcp.server.auth.providers.bearer",
+                     "fastmcp.server.auth.providers.jwt"):
+        try:
+            _mod = __import__(_modpath, fromlist=["StaticTokenVerifier"])
+            StaticTokenVerifier = getattr(_mod, "StaticTokenVerifier")
+            break
+        except (ImportError, AttributeError):
+            continue
+    if StaticTokenVerifier is None:
+        raise ImportError("could not locate StaticTokenVerifier in fastmcp; "
+                          "check the installed version's auth module layout")
     _auth = StaticTokenVerifier(tokens={_token: {"client_id": "lan"}})
     mcp = FastMCP("picrawler", auth=_auth)
 else:

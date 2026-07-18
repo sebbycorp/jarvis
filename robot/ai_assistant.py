@@ -20,12 +20,9 @@ import subprocess
 import wave
 
 sys.path.insert(0, os.path.expanduser("~/picrawler-app"))
-import numpy as np
-import sounddevice as sd
-from openai import OpenAI
-from picrawler_ctl import get_controller, LowBatteryError
 
-# ---- load .env ------------------------------------------------------------
+# ---- load .env BEFORE importing picrawler_ctl (its battery thresholds are
+# read from os.environ at import time) --------------------------------------
 _envp = os.path.expanduser("~/picrawler-app/.env")
 if os.path.exists(_envp):
     for _line in open(_envp):
@@ -33,6 +30,11 @@ if os.path.exists(_envp):
         if _line and not _line.startswith("#") and "=" in _line:
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
+
+import numpy as np  # noqa: E402
+import sounddevice as sd  # noqa: E402
+from openai import OpenAI  # noqa: E402
+from picrawler_ctl import get_controller, LowBatteryError  # noqa: E402
 
 SAMPLE_RATE = 16000
 RECORD_SECONDS = 5
@@ -82,7 +84,8 @@ def record_wav() -> str:
     audio = sd.rec(int(RECORD_SECONDS * SAMPLE_RATE), samplerate=SAMPLE_RATE,
                    channels=1, dtype="int16", **kwargs)
     sd.wait()
-    path = tempfile.mktemp(suffix=".wav")
+    fd, path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
@@ -101,7 +104,14 @@ def see_b64() -> str:
     return base64.b64encode(c.capture_jpeg_bytes()).decode()
 
 
-def run_action(action: str, steps: int = 2):
+def run_action(action: str, steps=2):
+    if action not in MOVE_ACTIONS and action not in POSE_ACTIONS:
+        return {"error": f"unknown action {action!r}"}
+    try:
+        steps = int(steps) if steps is not None else 2
+    except (TypeError, ValueError):
+        steps = 2
+    steps = max(1, min(5, steps))
     try:
         if action in POSE_ACTIONS:
             return c.pose(action)
@@ -125,15 +135,22 @@ def think_and_act(text: str, img_b64: str) -> str:
     msg = r.choices[0].message
     if msg.tool_calls:
         for tc in msg.tool_calls:
-            args = json.loads(tc.function.arguments)
-            run_action(args["action"], int(args.get("steps", 2)))
+            try:
+                args = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            action = args.get("action")
+            if action:
+                run_action(action, args.get("steps", 2))  # run_action validates
     return msg.content or "Okay."
 
 
 def say(text: str):
     """Speak via OpenAI TTS through the onboard speaker; fall back to Espeak."""
+    out = None
     try:
-        out = tempfile.mktemp(suffix=".mp3")
+        fd, out = tempfile.mkstemp(suffix=".mp3")
+        os.close(fd)
         with client.audio.speech.with_streaming_response.create(
                 model="tts-1", voice="alloy", input=text) as resp:
             resp.stream_to_file(out)
@@ -145,6 +162,12 @@ def say(text: str):
             raise RuntimeError("ffplay failed")
     except Exception:
         c.speak(text)  # offline Espeak fallback (onboard speaker)
+    finally:
+        if out and os.path.exists(out):
+            try:
+                os.remove(out)
+            except OSError:
+                pass
 
 
 def main():
@@ -154,6 +177,7 @@ def main():
     print("🤖 assistant ready — Ctrl-C to quit")
     say("Hi, I am online and ready.")
     while True:
+        wav = None
         try:
             wav = record_wav()
             text = transcribe(wav).strip()
@@ -166,6 +190,16 @@ def main():
         except KeyboardInterrupt:
             print("\nbye")
             break
+        except Exception as e:
+            # keep the loop alive on transient mic/camera/OpenAI errors
+            print("⚠️  turn failed:", e)
+            continue
+        finally:
+            if wav and os.path.exists(wav):
+                try:
+                    os.remove(wav)
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":

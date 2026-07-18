@@ -28,9 +28,11 @@ def index():
 
 @app.route("/api/move/<action>", methods=["POST"])
 def move(action):
-    steps = 1
-    if request.is_json:
-        steps = int(request.json.get("steps", 1))
+    body = request.get_json(silent=True) or {}
+    try:
+        steps = int(body.get("steps", 1))
+    except (TypeError, ValueError):
+        steps = 1
     try:
         if action in STEP_ACTIONS:
             return jsonify(STEP_ACTIONS[action](steps))
@@ -53,7 +55,11 @@ def pose(name):
 
 @app.route("/api/speed", methods=["POST"])
 def speed():
-    return jsonify(speed=c.set_speed(int(request.json["speed"])))
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(speed=c.set_speed(int(body["speed"])))
+    except (KeyError, TypeError, ValueError):
+        return jsonify(error="speed must be an integer 1-100"), 400
 
 
 @app.route("/api/status")
@@ -63,7 +69,8 @@ def status():
 
 @app.route("/api/speak", methods=["POST"])
 def speak():
-    return jsonify(c.speak(str(request.json.get("text", ""))))
+    body = request.get_json(silent=True) or {}
+    return jsonify(c.speak(str(body.get("text", ""))))
 
 
 def _mjpeg():

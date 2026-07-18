@@ -64,6 +64,7 @@ class PiCrawlerController:
         self._lock = threading.Lock()
         self._speed = self._clamp_speed(speed)
         self._camera_on = False
+        self._camera_lock = threading.Lock()  # separate: never held with _lock
         self._speaker_ready = False
         self._battery_guard = battery_guard
         os.makedirs(PHOTO_DIR, exist_ok=True)
@@ -161,7 +162,11 @@ class PiCrawlerController:
 
     # ---- camera -----------------------------------------------------------
     def _ensure_camera(self):
-        if not self._camera_on:
+        if self._camera_on:
+            return
+        with self._camera_lock:  # double-checked to avoid double camera_start
+            if self._camera_on:
+                return
             from vilib import Vilib
             Vilib.camera_start(vflip=False, hflip=False)
             Vilib.display(local=False, web=False)
