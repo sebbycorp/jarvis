@@ -6,6 +6,6 @@ PI="${PI:-pi-crawler}"
 SRC="$(cd "$(dirname "$0")/../robot" && pwd)/"
 rsync -az --delete \
   --exclude '.venv' --exclude '.env' --exclude 'photos' --exclude '__pycache__' \
-  -e "ssh -o StrictHostKeyChecking=no" \
+  -e "ssh -o StrictHostKeyChecking=accept-new" \
   "$SRC" "$PI:picrawler-app/"
 echo "deployed $SRC -> $PI:~/picrawler-app/"

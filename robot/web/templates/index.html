@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PiCrawler Control</title>
+<style>
+ :root { color-scheme: dark; }
+ body{font-family:system-ui,sans-serif;text-align:center;background:#111;color:#eee;margin:0;padding:1rem}
+ h2{margin:.2rem 0 .6rem}
+ #cam{max-width:100%;width:480px;border-radius:10px;background:#000;aspect-ratio:4/3;object-fit:cover}
+ .pad{display:grid;grid-template-columns:repeat(3,72px);gap:8px;justify-content:center;margin:1rem auto}
+ button{font-size:1.3rem;padding:14px;border:0;border-radius:10px;background:#2b6;color:#001;font-weight:600;cursor:pointer}
+ button:active{background:#184}
+ .b2{background:#c73;color:#fff}
+ .poses button{font-size:.95rem;padding:9px 12px;background:#357;color:#fff;margin:3px}
+ .row{margin:.6rem 0}
+ input[type=range]{width:70%}
+ #batt{font-size:.9rem;color:#9c9}
+ #batt.low{color:#f66;font-weight:700}
+</style>
+</head>
+<body>
+<h2>🕷️ PiCrawler</h2>
+<img id="cam" src="/stream" alt="camera feed">
+<div id="batt">battery: …</div>
+
+<div class="pad">
+ <span></span><button onclick="move('forward')">▲</button><span></span>
+ <button onclick="move('turn_left')">◀</button>
+ <button class="b2" onclick="move('stop')">■</button>
+ <button onclick="move('turn_right')">▶</button>
+ <span></span><button onclick="move('backward')">▼</button><span></span>
+</div>
+
+<div class="row">
+ <button onclick="move('stand')">Stand</button>
+ <button onclick="move('rest')">Rest</button>
+</div>
+
+<div class="row poses">
+ <button onclick="pose('wave')">Wave</button>
+ <button onclick="pose('push_up')">Push-up</button>
+ <button onclick="pose('dance')">Dance</button>
+ <button onclick="pose('look_up')">Look up</button>
+ <button onclick="pose('look_down')">Look down</button>
+</div>
+
+<div class="row">Speed
+ <input id="spd" type="range" min="1" max="100" value="80"
+   onchange="setSpeed(this.value)">
+ <span id="spdv">80</span>
+</div>
+
+<div class="row">
+ <input id="say" placeholder="say something…" style="padding:8px;border-radius:6px;border:0;width:55%">
+ <button onclick="speak()">Speak</button>
+</div>
+
+<script>
+ const STEPS = 2;
+ async function post(url, body){
+   const r = await fetch(url, {method:'POST',
+     headers:{'Content-Type':'application/json'},
+     body: JSON.stringify(body||{})});
+   if(r.status===409){ const j=await r.json(); alert('⚠️ '+j.error); }
+   return r;
+ }
+ const move  = a => post('/api/move/'+a, {steps:STEPS});
+ const pose  = n => post('/api/pose/'+n);
+ async function setSpeed(v){ document.getElementById('spdv').textContent=v;
+   await post('/api/speed', {speed:+v}); }
+ async function speak(){ const t=document.getElementById('say').value;
+   if(t) await post('/api/speak', {text:t}); }
+ async function poll(){
+   try{
+     const s = await (await fetch('/api/status')).json();
+     const el = document.getElementById('batt');
+     if(s.battery_v==null){ el.textContent='battery: n/a'; }
+     else{ el.textContent='battery: '+s.battery_v+' V'+(s.battery_ok?'':' — LOW!');
+           el.classList.toggle('low', !s.battery_ok); }
+   }catch(e){}
+ }
+ poll(); setInterval(poll, 5000);
+</script>
+</body>
+</html>

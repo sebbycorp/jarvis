@@ -1,0 +1,16 @@
+[Unit]
+Description=PiCrawler web control panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smaniak
+WorkingDirectory=/home/smaniak/picrawler-app
+ExecStart=/home/smaniak/picrawler-app/.venv/bin/python /home/smaniak/picrawler-app/web/app.py
+Restart=on-failure
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

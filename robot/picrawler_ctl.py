@@ -14,6 +14,7 @@ API facts verified on-device (robot-hat 2.5.x / picrawler 2.1.4 / py3.13):
 """
 from __future__ import annotations
 import os
+import re
 import time
 import threading
 
@@ -171,6 +172,11 @@ class PiCrawlerController:
         from vilib import Vilib
         self._ensure_camera()
         name = name or f"photo_{int(time.time())}"
+        # Sanitize: strip any path components / unsafe chars so `name` cannot
+        # escape PHOTO_DIR (path traversal). Keep only [A-Za-z0-9_-].
+        name = re.sub(r"[^A-Za-z0-9_-]", "_", str(name))[:64]
+        if not name:
+            name = f"photo_{int(time.time())}"
         Vilib.take_photo(name, PHOTO_DIR)
         time.sleep(0.3)
         return os.path.join(PHOTO_DIR, f"{name}.jpg")
@@ -191,6 +197,10 @@ class PiCrawlerController:
     # ---- audio ------------------------------------------------------------
     def speak(self, text: str) -> dict:
         from robot_hat.tts import Espeak, enable_speaker
+        # robot_hat's Espeak shells out with the text, and speak() is exposed
+        # UNAUTHENTICATED over MCP — strip shell metacharacters to prevent
+        # command injection while keeping normal punctuation readable.
+        safe = re.sub(r"[`$;|&<>\\\"'\n\r()]", "", str(text))[:500]
         with self._lock:
             if not self._speaker_ready:
                 try:
@@ -198,8 +208,8 @@ class PiCrawlerController:
                 except Exception:
                     pass
                 self._speaker_ready = True
-            Espeak().say(text)
-        return {"spoke": text}
+            Espeak().say(safe)
+        return {"spoke": safe}
 
     # ---- status -----------------------------------------------------------
     def status(self) -> dict:

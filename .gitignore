@@ -1,0 +1,6 @@
+# Never commit robot secrets or local artifacts
+robot/.env
+**/.env
+**/__pycache__/
+**/photos/
+*.pyc
