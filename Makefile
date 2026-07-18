@@ -5,7 +5,10 @@ VENV = ~/picrawler-app/.venv/bin/python
 APP  = ~/picrawler-app
 
 .PHONY: help test lint deploy preflight status battery logs restart stop-all \
-        install-services mcp-add walk stand rest web ai ssh
+        install-services mcp-add walk stand rest web ai ssh \
+        gw-apply gw-status gw-forward gw-test gw-mcp-add
+
+GWCTX ?= kind-agw-picrawler
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -64,3 +67,21 @@ ai: ## Run the AI assistant in the foreground (stops MCP first)
 
 ssh: ## Open a shell on the Pi
 	ssh $(PI)
+
+# --- AgentGateway (LAN-local kind cluster fronting the picrawler MCP) ---
+gw-apply: ## Apply the gateway config (gateway/*.yaml) to the AGW cluster
+	kubectl --context $(GWCTX) apply -f gateway/
+
+gw-status: ## Show gateway / route / backend status
+	kubectl --context $(GWCTX) -n agentgateway-system get gateway,httproute,agentgatewaybackend
+
+gw-forward: ## Port-forward the gateway proxy to localhost:8080
+	kubectl --context $(GWCTX) -n agentgateway-system port-forward svc/agentgateway-proxy 8080:8080
+
+gw-test: ## Send an MCP initialize through the gateway (needs gw-forward running + Pi up)
+	curl -s -X POST http://localhost:8080/mcp \
+	  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+	  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"make","version":"1"}}}' | head -c 600; echo
+
+gw-mcp-add: ## Register the gateway-fronted MCP with Claude Code (needs gw-forward)
+	claude mcp add --transport http picrawler-gw http://localhost:8080/mcp

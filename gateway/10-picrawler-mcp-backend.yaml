@@ -1,0 +1,18 @@
+# MCP backend pointing at the EXTERNAL picrawler MCP server on the Pi.
+# The Pi is outside the cluster, so we use a `static` target (host/port), not a
+# Service selector. protocol StreamableHTTP matches FastMCP (transport="http");
+# path defaults to /mcp for StreamableHTTP but we set it explicitly.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: picrawler-mcp
+  namespace: agentgateway-system
+spec:
+  mcp:
+    targets:
+      - name: picrawler
+        static:
+          host: 172.16.10.117
+          port: 8000
+          protocol: StreamableHTTP
+          path: /mcp
