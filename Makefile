@@ -4,12 +4,18 @@ PI  ?= pi-crawler
 VENV = ~/picrawler-app/.venv/bin/python
 APP  = ~/picrawler-app
 
-.PHONY: help deploy preflight status battery logs restart stop-all \
+.PHONY: help test lint deploy preflight status battery logs restart stop-all \
         install-services mcp-add walk stand rest web ai ssh
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	 awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}'
+
+test: ## Run off-robot unit tests (mocked hardware, no Pi needed)
+	python3 -m unittest discover -s tests -v
+
+lint: ## Byte-compile all robot modules to catch syntax errors
+	python3 -m py_compile robot/*.py robot/web/app.py
 
 deploy: ## Sync robot/ to the Pi (excludes .env, venv, photos)
 	./scripts/deploy.sh
