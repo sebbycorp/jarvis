@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV GPIOZERO_PIN_FACTORY=lgpio
 
 RUN pip install --no-cache-dir \
-      flask smbus2 gpiozero lgpio spidev pillow "pygame>=2.1.2"
+      flask smbus2 gpiozero lgpio spidev pillow "pygame>=2.1.2" pyaudio
 
 # SunFounder libs (same sources as the host install)
 RUN pip install --no-cache-dir "git+https://github.com/sunfounder/robot-hat.git@2.5.x"
