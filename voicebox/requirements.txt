@@ -28,6 +28,11 @@ scipy>=1.3
 scikit-learn>=1
 tqdm>=4
 
+# --- speech out ---
+# The Python API keeps the voice model resident. Shelling out to the `piper`
+# CLI reloads 61MB every reply: 7.1s of pure overhead per turn.
+piper-tts>=1.2
+
 # --- interfaces ---
 fastmcp>=3.0            # MCP server
 flask>=3.0              # web panel

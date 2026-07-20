@@ -234,8 +234,13 @@ def play_command(rate: int, channels: int = 1) -> list[str]:
 # quiet on a small speaker even at full volume. Compressing the dynamic range
 # lifts RMS ~6 dB (roughly double the loudness) without clipping the peaks.
 # Measured on this box: -17.7 -> -12.0 dBFS.
+# Deliberately no `gain -n` (normalise): speech is synthesized and compressed
+# one sentence-chunk at a time, and normalising each chunk independently makes
+# a quiet sentence as loud as a shouted one. A fixed curve plus fixed 1dB of
+# headroom is deterministic — the same input always gives the same output — and
+# measured louder anyway (-10.8 vs -11.8 dBFS RMS).
 COMPAND = ["compand", "0.3,1", "6:-70,-60,-20", "-5", "-90", "0.2",
-           "gain", "-n", "-1"]
+           "gain", "-1"]
 
 
 def compress(pcm: bytes, rate: int, channels: int = 1) -> bytes:
