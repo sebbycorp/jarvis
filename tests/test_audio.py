@@ -217,3 +217,47 @@ class TestPlayCommand(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPreroll(unittest.TestCase):
+    """Recording starts after the wake word fires, so a request run straight
+    into "hey jarvis" loses its first syllables ("ask Grok" -> "rock")."""
+
+    def _mic(self, rate=16000):
+        with mock.patch.object(audio, "pick_capture_rate", return_value=rate):
+            return audio.Microphone(device="x")
+
+    def test_delivered_frames_are_retained(self):
+        mic = self._mic()
+        frame = b"\x01\x02" * audio.FRAME_SAMPLES
+        for _ in range(3):
+            mic._q.append(frame)
+        gen = mic.frames()
+        for _ in range(3):
+            next(gen)
+        self.assertEqual(mic.preroll(), frame * 3)
+
+    def test_history_is_bounded_by_the_configured_seconds(self):
+        mic = self._mic()
+        expected = int(audio.config.PREROLL_S * 1000 / audio.config.FRAME_MS)
+        self.assertEqual(mic._history.maxlen, expected)
+
+        frame = b"\x00\x00" * audio.FRAME_SAMPLES
+        for _ in range(expected + 20):
+            mic._q.append(frame)
+        gen = mic.frames()
+        for _ in range(expected + 20):
+            next(gen)
+        # older audio is dropped rather than growing without bound
+        self.assertEqual(len(mic.preroll()), expected * audio.FRAME_SAMPLES * 2)
+
+    def test_flush_clears_the_preroll_too(self):
+        # our own TTS must not be prepended to the next recording
+        mic = self._mic()
+        mic._q.append(b"\x01\x02" * audio.FRAME_SAMPLES)
+        next(mic.frames())
+        mic.flush()
+        self.assertEqual(mic.preroll(), b"")
+
+    def test_preroll_is_empty_before_any_audio(self):
+        self.assertEqual(self._mic().preroll(), b"")

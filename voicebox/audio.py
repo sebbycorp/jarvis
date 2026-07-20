@@ -114,6 +114,11 @@ class Microphone:
         # blocksize in *capture* samples that yields one 16 kHz output frame
         self.blocksize = int(round(self.rate * config.FRAME_MS / 1000))
         self._q: deque[bytes] = deque(maxlen=200)  # ~4s of backlog
+        # Frames already handed out, kept so a recording can include the moment
+        # *before* the wake word fired — people run "hey jarvis" straight into
+        # their request and the first syllables get clipped otherwise.
+        self._history: deque[bytes] = deque(
+            maxlen=max(1, int(config.PREROLL_S * 1000 / config.FRAME_MS)))
         self._stream: sd.RawInputStream | None = None
         self._event = threading.Event()
 
@@ -156,6 +161,12 @@ class Microphone:
     def flush(self) -> None:
         """Drop buffered audio (e.g. our own TTS bleeding into the mic)."""
         self._q.clear()
+        self._history.clear()
+
+    def preroll(self) -> bytes:
+        """The most recent already-delivered audio, for prepending to a
+        recording so the start of the request isn't clipped."""
+        return b"".join(self._history)
 
     def frames(self) -> Iterator[bytes]:
         """Yield 20 ms mono int16 frames at config.SAMPLE_RATE (16 kHz),
@@ -164,6 +175,7 @@ class Microphone:
             while self._q:
                 raw = self._q.popleft()
                 if self.rate == config.SAMPLE_RATE:
+                    self._history.append(raw)
                     yield raw
                     continue
                 block = np.frombuffer(raw, dtype=np.int16)
@@ -174,7 +186,9 @@ class Microphone:
                     out = out[:FRAME_SAMPLES]
                 elif len(out) < FRAME_SAMPLES:
                     out = np.pad(out, (0, FRAME_SAMPLES - len(out)))
-                yield out.tobytes()
+                frame = out.tobytes()
+                self._history.append(frame)
+                yield frame
             self._event.clear()
             self._event.wait(timeout=0.5)
 

@@ -126,7 +126,9 @@ class Assistant:
                     if not self.wake.wait(frames):
                         break
                     print(f"👂 listening… (wake {self.wake.last_score:.2f})")
-                    pcm = self.recorder.record(frames)
+                    # include the audio from just before the trigger, or a
+                    # request run straight into the wake word loses its start
+                    pcm = mic.preroll() + self.recorder.record(frames)
                     if not pcm:
                         continue
 

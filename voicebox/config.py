@@ -123,6 +123,10 @@ VAD_AGGRESSIVENESS = _i("VOICEBOX_VAD_AGGRESSIVENESS", 2)
 MAX_UTTERANCE_S = _f("VOICEBOX_MAX_UTTERANCE_S", 15.0)
 SILENCE_TAIL_S = _f("VOICEBOX_SILENCE_TAIL_S", 0.8)
 MIN_UTTERANCE_S = _f("VOICEBOX_MIN_UTTERANCE_S", 0.4)
+# Audio retained from *before* the wake word fires and prepended to the
+# recording. People run "hey jarvis" straight into their request, so the first
+# syllables land during detection and were being lost ("ask Grok" -> "rock").
+PREROLL_S = _f("VOICEBOX_PREROLL_S", 0.6)
 
 # ---- STT / TTS (both local) ------------------------------------------------
 # tiny.en transcribes these short commands identically to base.en on this box

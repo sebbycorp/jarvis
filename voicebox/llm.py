@@ -23,14 +23,18 @@ import config
 
 # Spoken aliases -> backend name. Longest match wins, so order doesn't matter.
 # These are matched against *whisper output*, not what the user meant, so the
-# misspellings matter: whisper reliably writes "Groc" for "Grok" and "Quinn"
-# for "Qwen". Missing a variant silently routes the turn to the wrong model.
+# misspellings matter: whisper has produced "Groc", "Grock" and even "rock"
+# (the leading G clipped) for Grok. Missing a variant silently routes the turn
+# to the wrong model. Ambiguous entries like "rock" are safe because every
+# routing pattern requires an ask-verb, a greeting, or punctuation before the
+# name — "play some rock music" is a question, not a route.
 ALIASES: dict[str, str] = {
     "local": "local", "qwen": "local", "quen": "local", "quinn": "local",
     "gwen": "local", "spark": "local", "offline": "local",
     "gpt": "openai", "chat gpt": "openai", "chatgpt": "openai",
     "open ai": "openai", "openai": "openai", "g p t": "openai",
     "grok": "grok", "grock": "grok", "groc": "grok", "grok's": "grok",
+    "crock": "grok", "rock": "grok", "brock": "grok", "grog": "grok",
     "x a i": "grok", "xai": "grok",
 }
 _ALIAS_RE = "|".join(sorted((re.escape(a) for a in ALIASES), key=len, reverse=True))
