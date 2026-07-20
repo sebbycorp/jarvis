@@ -136,7 +136,13 @@ WAVE_COOLDOWN_S = _f("VOICEBOX_WAVE_COOLDOWN_S", 3.0)
 
 # ---- speech capture --------------------------------------------------------
 VAD_AGGRESSIVENESS = _i("VOICEBOX_VAD_AGGRESSIVENESS", 2)
-MAX_UTTERANCE_S = _f("VOICEBOX_MAX_UTTERANCE_S", 15.0)
+# Cap on one utterance. 15s was too generous: a trigger in a room with a TV
+# recorded the full 15s of background talk and then spent 12s transcribing it.
+# Spoken commands are almost always under 8s.
+MAX_UTTERANCE_S = _f("VOICEBOX_MAX_UTTERANCE_S", 9.0)
+# Give up if nobody starts speaking this soon after the trigger, instead of
+# waiting out MAX_UTTERANCE_S. Covers an accidental wave or a misfire.
+LEAD_SILENCE_S = _f("VOICEBOX_LEAD_SILENCE_S", 3.0)
 SILENCE_TAIL_S = _f("VOICEBOX_SILENCE_TAIL_S", 0.8)
 MIN_UTTERANCE_S = _f("VOICEBOX_MIN_UTTERANCE_S", 0.4)
 # Audio retained from *before* the wake word fires and prepended to the
@@ -155,7 +161,12 @@ WHISPER_THREADS = _i("VOICEBOX_WHISPER_THREADS", 4)
 # time with no transcript change. 768/1500 * 30s = 15.4s of coverage.
 WHISPER_AUDIO_CTX = _i("VOICEBOX_WHISPER_AUDIO_CTX", 768)
 PIPER_BIN = _s("VOICEBOX_PIPER_BIN", "piper")
-PIPER_VOICE = _s("VOICEBOX_PIPER_VOICE", str(APP_DIR / "models/en_US-amy-medium.onnx"))
+PIPER_VOICE = _s("VOICEBOX_PIPER_VOICE", str(APP_DIR / "models/en_US-kristin-medium.onnx"))
+# Delivery tuning. length_scale is pace (>1 slower, and slower reads warmer);
+# noise_scale/noise_w_scale control expressiveness and timing variation.
+PIPER_LENGTH_SCALE = _f("VOICEBOX_PIPER_LENGTH_SCALE", 1.15)
+PIPER_NOISE_SCALE = _f("VOICEBOX_PIPER_NOISE_SCALE", 0.667)
+PIPER_NOISE_W_SCALE = _f("VOICEBOX_PIPER_NOISE_W_SCALE", 0.8)
 
 # ---- camera ----------------------------------------------------------------
 CAMERA_ENABLED = _b("VOICEBOX_CAMERA_ENABLED", True)

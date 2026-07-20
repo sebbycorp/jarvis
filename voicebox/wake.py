@@ -120,9 +120,10 @@ class Recorder:
     def record(self, frames: Iterator[bytes]) -> bytes:
         """Collect PCM until the speaker stops. Returns raw s16 mono PCM.
 
-        Leading silence is tolerated up to MAX_UTTERANCE_S so a slow start
-        doesn't cut the user off; once speech begins, SILENCE_TAIL_S of quiet
-        ends the turn.
+        Bounded three ways: LEAD_SILENCE_S to start talking at all (an
+        accidental trigger gives up quickly instead of waiting out the full
+        window), SILENCE_TAIL_S of quiet to end once speech has begun, and
+        MAX_UTTERANCE_S overall.
         """
         collected: list[bytes] = []
         started = False
@@ -141,7 +142,10 @@ class Recorder:
                 collected.append(frame)  # keep the tail; whisper likes padding
                 if silence >= config.SILENCE_TAIL_S:
                     break
-            if time.monotonic() - start > config.MAX_UTTERANCE_S:
+            elapsed = time.monotonic() - start
+            if not started and elapsed > config.LEAD_SILENCE_S:
+                return b""  # nobody spoke — an accidental trigger
+            if elapsed > config.MAX_UTTERANCE_S:
                 break
 
         pcm = b"".join(collected)

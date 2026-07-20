@@ -108,13 +108,34 @@ def say(text: str) -> dict:
         return _espeak(text)
 
 
+def _syn_config():
+    """Delivery settings, or None if this piper build predates them."""
+    try:
+        from piper import SynthesisConfig
+    except ImportError:
+        return None
+    try:
+        return SynthesisConfig(length_scale=config.PIPER_LENGTH_SCALE,
+                               noise_scale=config.PIPER_NOISE_SCALE,
+                               noise_w_scale=config.PIPER_NOISE_W_SCALE)
+    except TypeError:
+        return None  # older field names; fall back to the voice defaults
+
+
+def _synthesize_chunks(voice, text: str):
+    cfg = _syn_config()
+    if cfg is None:
+        return voice.synthesize(text)
+    return voice.synthesize(text, syn_config=cfg)
+
+
 def _say_streaming(voice, text: str) -> dict:
     """Pipe synthesis chunks into a single aplay as they are produced."""
-    chunks = voice.synthesize(text)
+    chunks = _synthesize_chunks(voice, text)
     first = next(iter(chunks), None) if not isinstance(chunks, list) else None
     # `synthesize` is a generator; pull the first chunk to learn the rate
     if first is None:
-        iterator = iter(voice.synthesize(text))
+        iterator = iter(_synthesize_chunks(voice, text))
         first = next(iterator, None)
     else:
         iterator = chunks
