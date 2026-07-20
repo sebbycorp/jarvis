@@ -20,6 +20,7 @@ import audio
 import config
 import llm
 import music
+import proximity
 import stt
 import tts
 import wake
@@ -47,6 +48,7 @@ class Assistant:
         self.transcriber = stt.get_transcriber()
         self.wake = wake.WakeWord()
         self.recorder = wake.Recorder()
+        self.ranger = proximity.get_ranger()
         self._volume = 70
 
     # ---- one turn ----------------------------------------------------------
@@ -111,7 +113,10 @@ class Assistant:
 
     # ---- the loop ----------------------------------------------------------
     def run(self) -> None:
+        waving = self.ranger.start()
         listening = "say the wake word" if self.wake.available else "just talk"
+        if waving:
+            listening += f" or wave within {config.WAVE_CM:.0f}cm"
         print(f"🔊 {config.WAKE_NAME} ready — {listening}. Ctrl-C to quit.")
         print(f"   stt={self.transcriber.backend}  "
               f"tts={'piper' if tts.available() else 'espeak'}  "
@@ -123,9 +128,13 @@ class Assistant:
             while True:
                 try:
                     mic.flush()
-                    if not self.wake.wait(frames):
+                    self.ranger.clear()
+                    if not self.wake.wait(frames, self.ranger.triggered):
                         break
-                    print(f"👂 listening… (wake {self.wake.last_score:.2f})")
+                    if self.wake.source == "wave":
+                        print(f"👋 listening… (wave at {self.ranger.last_cm:.0f}cm)")
+                    else:
+                        print(f"👂 listening… (wake {self.wake.last_score:.2f})")
                     # Grab the pre-roll first: it holds the moment before the
                     # trigger, so a request run straight into the wake word
                     # doesn't lose its start. Then beep, then drop whatever the

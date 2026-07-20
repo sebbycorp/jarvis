@@ -123,6 +123,17 @@ WAKE_ENABLED = _b("VOICEBOX_WAKE_ENABLED", True)
 WAKE_MODEL = _s("VOICEBOX_WAKE_MODEL", "hey_jarvis")
 WAKE_THRESHOLD = _f("VOICEBOX_WAKE_THRESHOLD", 0.5)
 
+# ---- proximity (HC-SR04 on the Robot HAT) ----------------------------------
+# A physical trigger background audio cannot fake — the TV repeatedly tripped
+# the wake word, a hand in front of the sensor never will.
+PROXIMITY_ENABLED = _b("VOICEBOX_PROXIMITY_ENABLED", True)
+PROXIMITY_TRIG = _s("VOICEBOX_PROXIMITY_TRIG", "D2")
+PROXIMITY_ECHO = _s("VOICEBOX_PROXIMITY_ECHO", "D3")
+PROXIMITY_POLL_S = _f("VOICEBOX_PROXIMITY_POLL_S", 0.12)
+WAVE_CM = _f("VOICEBOX_WAVE_CM", 20.0)      # hand this close = trigger
+WAVE_SAMPLES = _i("VOICEBOX_WAVE_SAMPLES", 2)   # consecutive close readings
+WAVE_COOLDOWN_S = _f("VOICEBOX_WAVE_COOLDOWN_S", 3.0)
+
 # ---- speech capture --------------------------------------------------------
 VAD_AGGRESSIVENESS = _i("VOICEBOX_VAD_AGGRESSIVENESS", 2)
 MAX_UTTERANCE_S = _f("VOICEBOX_MAX_UTTERANCE_S", 15.0)

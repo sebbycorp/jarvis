@@ -107,6 +107,21 @@ def check_wake() -> None:
         report(WARN, "wake word", str(e))
 
 
+def check_proximity() -> None:
+    import proximity
+    r = proximity.Ranger()
+    if not r.open():
+        report(WARN, "proximity", r.error or "ultrasonic sensor unavailable")
+        return
+    readings = [r.read() for _ in range(4)]
+    good = [v for v in readings if v > 0]
+    if not good:
+        report(WARN, "proximity", "sensor present but no echo returned")
+        return
+    report(OK, "proximity",
+           f"{sum(good) / len(good):.1f}cm (wave under {config.WAVE_CM:.0f}cm)")
+
+
 def check_vad() -> None:
     try:
         import webrtcvad  # noqa: F401
@@ -153,7 +168,8 @@ def check_compand() -> None:
 def main() -> None:
     print(f"— {config.WAKE_NAME} preflight —  app dir: {config.APP_DIR}\n")
     for check in (check_mic, check_speaker, check_compand, check_stt,
-                  check_tts, check_wake, check_vad, check_camera, check_music,
+                  check_tts, check_wake, check_vad, check_proximity, check_camera,
+                  check_music,
                   check_gateway):
         try:
             check()

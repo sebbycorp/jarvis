@@ -3,6 +3,7 @@
 Both consume the shared 16 kHz frame stream from audio.Microphone.
 """
 from __future__ import annotations
+import threading
 import time
 from collections.abc import Iterator
 
@@ -26,6 +27,7 @@ class WakeWord:
         self._model = None
         self.available = False
         self.last_score = 0.0
+        self.source = "wake"
         if not config.WAKE_ENABLED:
             return
         try:
@@ -58,19 +60,31 @@ class WakeWord:
             best = max(best, max(scores.values()) if scores else 0.0)
         return best
 
-    def wait(self, frames: Iterator[bytes]) -> bool:
+    def wait(self, frames: Iterator[bytes],
+             interrupt: "threading.Event | None" = None) -> bool:
         """Block until the wake word fires. Returns False if the stream ends.
 
-        `last_score` holds the triggering score — log it when tuning: a genuine
-        wake word usually scores well above 0.9, while background speech that
-        sneaks past sits just over the threshold.
+        `interrupt` is an optional Event (the ultrasonic hand-wave) that also
+        ends the wait — it is checked every frame, so the mic keeps being
+        drained either way and the two triggers stay in sync.
+
+        `last_score` holds the triggering score, and `source` says which
+        trigger fired. Log the score when tuning: a genuine wake word scores
+        well above 0.9, while background speech that sneaks past sits just
+        over the threshold.
         """
         self.last_score = 0.0
+        self.source = "wake"
         if self._model is None:
             next(frames, None)
             return True
         self.reset()
         for frame in frames:
+            if interrupt is not None and interrupt.is_set():
+                interrupt.clear()
+                self.source = "wave"
+                self.reset()
+                return True
             score = self.detect(frame)
             if score >= self.threshold:
                 self.last_score = score
