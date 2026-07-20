@@ -63,39 +63,6 @@ HISTORY_TURNS = _i("VOICEBOX_HISTORY_TURNS", 6)
 TOOLS_ENABLED = _b("VOICEBOX_TOOLS_ENABLED", True)
 MAX_TOOL_ROUNDS = _i("VOICEBOX_MAX_TOOL_ROUNDS", 3)
 
-# ---- remote MCP servers (tools that live off the box) ----------------------
-# "name=url[|tool,tool]" entries, semicolon separated. The optional tool list
-# is an allowlist: /github alone exposes 47 tools, and pushing all of them into
-# every prompt is slow, expensive, and makes a small model choose badly.
-# OFF by default: the box is a voice chatbot first, and every remote tool adds
-# schema to each prompt plus a round trip when called. Opt in by setting this,
-# e.g. to give it live weather:
-#   VOICEBOX_MCP_SERVERS=weather=http://172.16.10.155:31606/openapi-mcp
-# or the drone, with an allowlist after the pipe:
-#   drone=http://172.16.10.155:31606/drone|get_battery,takeoff,land
-MCP_SERVERS = _s("VOICEBOX_MCP_SERVERS", "")
-MCP_TIMEOUT = _f("VOICEBOX_MCP_TIMEOUT", 30.0)
-# Hard cap on remote tools offered to the model, whatever the config asks for.
-MCP_TOOL_LIMIT = _i("VOICEBOX_MCP_TOOL_LIMIT", 16)
-# Separator in qualified names ("weather.getWeatherForecast"). Must be legal in
-# an OpenAI function name: ^[a-zA-Z0-9_-]+$ — so not "." or ":".
-MCP_NAME_SEP = "__"
-
-
-def mcp_servers() -> list[tuple[str, str, list[str]]]:
-    """Parse MCP_SERVERS into (name, url, allowlist)."""
-    out = []
-    for entry in MCP_SERVERS.split(";"):
-        entry = entry.strip()
-        if not entry or "=" not in entry:
-            continue
-        name, _, rest = entry.partition("=")
-        url, _, allow = rest.partition("|")
-        url = url.strip().format(host=GATEWAY_HOST)
-        tools = [t.strip() for t in allow.split(",") if t.strip()]
-        out.append((name.strip(), url, tools))
-    return out
-
 # Qwen is a reasoning model: left alone it spends the whole token budget
 # thinking and returns empty `content`. A voice assistant wants the answer, not
 # the deliberation, so thinking is off by default.
