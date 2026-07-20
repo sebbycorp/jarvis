@@ -46,7 +46,18 @@ def tool(name: str, description: str, params: dict | None = None,
 
 
 def schemas() -> list[dict]:
-    return [t["schema"] for t in _REGISTRY.values()]
+    """Local tools plus whatever the configured MCP servers expose."""
+    local = [t["schema"] for t in _REGISTRY.values()]
+    if not config.MCP_SERVERS.strip():
+        return local
+    try:
+        import mcp_client
+        registry = mcp_client.get_registry()
+        registry.load()
+        return local + registry.schemas()
+    except Exception as e:  # a broken MCP server must not disarm local tools
+        print(f"⚠️  remote MCP tools unavailable: {e}")
+        return local
 
 
 def names() -> list[str]:
@@ -57,6 +68,20 @@ def dispatch(name: str, arguments: str | dict) -> dict:
     """Run a tool call. Never raises — the model gets the error as a result."""
     entry = _REGISTRY.get(name)
     if entry is None:
+        # not local — try the remote MCP servers before giving up
+        try:
+            import mcp_client
+            registry = mcp_client.get_registry()
+            if registry.handles(name):
+                args = arguments
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args or "{}")
+                    except json.JSONDecodeError:
+                        return {"error": f"could not parse arguments: {args[:120]}"}
+                return registry.dispatch(name, args if isinstance(args, dict) else {})
+        except Exception as e:
+            return {"error": f"remote tool {name} failed: {e}"}
         return {"error": f"no such tool: {name}"}
     if isinstance(arguments, str):
         try:
