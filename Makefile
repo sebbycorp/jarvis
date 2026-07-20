@@ -88,6 +88,21 @@ install-services: ## Copy + enable systemd units (assistant autostarts)
 	  sudo systemctl daemon-reload && sudo systemctl enable --now voicebox && \
 	  systemctl is-active voicebox"
 
+cam-build: ## Build the camera streaming container on the Pi
+	rsync -az --delete --exclude '*.pgp' -e ssh camstream/ $(PI):camstream/
+	ssh $(PI) "cp /usr/share/keyrings/raspberrypi-archive-keyring.pgp ~/camstream/ && \
+	  cd ~/camstream && docker compose build"
+
+cam-up: ## Start the camera stream (autostarts on boot thereafter)
+	ssh $(PI) "cd ~/camstream && docker compose up -d && docker compose ps"
+	@echo "-> http://$(HOST):8081"
+
+cam-down: ## Stop the camera stream and free the camera
+	ssh $(PI) "cd ~/camstream && docker compose down"
+
+cam-logs: ## Tail the camera container logs
+	ssh $(PI) "cd ~/camstream && docker compose logs -f --tail 50"
+
 mcp-add: ## Register the box's MCP server with Claude Code
 	claude mcp add --transport http voicebox http://$(HOST):8000/mcp
 

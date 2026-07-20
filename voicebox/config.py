@@ -171,6 +171,9 @@ PIPER_NOISE_W_SCALE = _f("VOICEBOX_PIPER_NOISE_W_SCALE", 0.8)
 # ---- camera ----------------------------------------------------------------
 CAMERA_ENABLED = _b("VOICEBOX_CAMERA_ENABLED", True)
 PHOTO_DIR = _s("VOICEBOX_PHOTO_DIR", str(APP_DIR / "photos"))
+# The camera has exactly one owner. Holding it open after a vision question
+# would lock out the streaming container, so it is released once idle.
+CAMERA_IDLE_S = _f("VOICEBOX_CAMERA_IDLE_S", 8.0)
 
 # ---- music -----------------------------------------------------------------
 MUSIC_DIR = _s("VOICEBOX_MUSIC_DIR", str(APP_DIR / "music"))
@@ -186,10 +189,13 @@ WEB_PORT = _i("WEB_PORT", 5000)
 WAKE_NAME = _s("VOICEBOX_NAME", "Jarvis")
 SYSTEM_PROMPT = _s(
     "VOICEBOX_SYSTEM_PROMPT",
-    f"You are {WAKE_NAME}, a helpful voice assistant living in a small speaker. "
-    "Your replies are spoken aloud, so keep them short and conversational — one "
-    "or two sentences unless asked for detail. Never use markdown, bullet points, "
-    "emoji, or code blocks. Spell out numbers and units the way a person says them.",
+    f"You are {WAKE_NAME}, the household AI. You address the user as 'sir'. "
+    "Your manner is formal, understated and unflappable: you report rather than "
+    "chat, you never gush, and you allow yourself the occasional dry aside. "
+    "Confirm actions briefly ('Certainly, sir.') rather than narrating them. "
+    "Your replies are spoken aloud, so keep them to one or two sentences unless "
+    "asked for detail. Never use markdown, bullet points, emoji, or code blocks. "
+    "Spell out numbers and units the way a person says them.",
 )
 
 

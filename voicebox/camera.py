@@ -29,6 +29,7 @@ class Camera:
         self._cam = None
         self._lock = threading.Lock()
         self._broken: str | None = None
+        self._idle_timer: threading.Timer | None = None
 
     def _open(self):
         from picamera2 import Picamera2
@@ -74,8 +75,12 @@ class Camera:
                             "CSI ribbon cable is seated at both ends")
             raise CameraError(self._broken)
         if "error" in box:
-            self._broken = f"camera unavailable: {box['error']}"
-            raise CameraError(self._broken) from box["error"]
+            message = f"camera unavailable: {box['error']}"
+            # "device busy" means another process (the streaming container)
+            # holds it right now — transient, so don't latch it as broken
+            if "busy" not in str(box["error"]).lower():
+                self._broken = message
+            raise CameraError(message) from box["error"]
         return box["value"]
 
     @property
@@ -94,8 +99,22 @@ class Camera:
             cam.capture_file(buf, format="jpeg")
             return buf.getvalue()
 
-        with self._lock:
-            return self._run(grab)
+        try:
+            with self._lock:
+                return self._run(grab)
+        finally:
+            self._schedule_release()
+
+    def _schedule_release(self) -> None:
+        """Hand the camera back after a quiet spell so another process (the
+        streaming container) can take it."""
+        if config.CAMERA_IDLE_S <= 0:
+            return
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+        self._idle_timer = threading.Timer(config.CAMERA_IDLE_S, self.close)
+        self._idle_timer.daemon = True
+        self._idle_timer.start()
 
     def save_photo(self, name: str | None = None) -> str:
         os.makedirs(config.PHOTO_DIR, exist_ok=True)
@@ -113,6 +132,9 @@ class Camera:
         return path
 
     def close(self) -> None:
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
         with self._lock:
             if self._cam is not None:
                 try:

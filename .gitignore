@@ -9,3 +9,6 @@
 **/music/
 tests/.appdir/
 .venv/
+
+# staged from the Pi at build time, not source
+camstream/*.pgp

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camera</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1116; --card:#181b22; --line:#272b35;
+          --fg:#e8eaef; --dim:#98a1b0; --accent:#5b9dff; --hot:#ff7b5b; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:1rem; background:var(--bg); color:var(--fg);
+         font:15px/1.5 system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 900px; margin:0 auto; }
+  header { display:flex; align-items:center; gap:.6rem; margin-bottom:.9rem; }
+  h1 { font-size:1.15rem; margin:0; font-weight:600; }
+  .dot { width:.6rem; height:.6rem; border-radius:50%; background:#555;
+         flex:none; transition:background .3s; }
+  .dot.live { background:#3ddc84; box-shadow:0 0 8px #3ddc84; }
+  .dot.motion { background:var(--hot); box-shadow:0 0 10px var(--hot); }
+  .frame { position:relative; background:#000; border:1px solid var(--line);
+           border-radius:12px; overflow:hidden; aspect-ratio:{{ width }}/{{ height }}; }
+  .frame img { width:100%; height:100%; object-fit:contain; display:block; }
+  .frame .msg { position:absolute; inset:0; display:grid; place-items:center;
+                color:var(--dim); font-size:.9rem; text-align:center; padding:1rem; }
+  .bar { display:flex; gap:.5rem; flex-wrap:wrap; margin:.85rem 0; }
+  button { font:inherit; border-radius:8px; padding:.5rem .8rem; cursor:pointer;
+           border:1px solid var(--line); background:#222732; color:var(--fg); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#0d1017;
+                   font-weight:600; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+           gap:.6rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+          padding:.7rem .8rem; }
+  .card .k { color:var(--dim); font-size:.72rem; text-transform:uppercase;
+             letter-spacing:.05em; }
+  .card .v { font-size:1.05rem; margin-top:.15rem; font-variant-numeric:tabular-nums; }
+  .meter { height:5px; background:#272b35; border-radius:3px; overflow:hidden;
+           margin-top:.45rem; }
+  .meter i { display:block; height:100%; background:var(--accent); width:0;
+             transition:width .25s, background .25s; }
+  .meter i.hot { background:var(--hot); }
+  ul { list-style:none; padding:0; margin:.6rem 0 0; max-height:180px; overflow:auto; }
+  li { display:flex; justify-content:space-between; gap:1rem; padding:.35rem .1rem;
+       border-bottom:1px solid var(--line); font-size:.88rem; }
+  li:last-child { border-bottom:0; }
+  li .score { color:var(--dim); font-variant-numeric:tabular-nums; }
+  h2 { font-size:.75rem; text-transform:uppercase; letter-spacing:.06em;
+       color:var(--dim); margin:1.2rem 0 .4rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>Camera</h1>
+  </header>
+
+  <div class="frame">
+    <img id="view" alt="">
+    <div class="msg" id="msg">stream stopped</div>
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="toggle" onclick="toggle()">Start stream</button>
+    <button onclick="snap()">Snapshot</button>
+    <button onclick="location.reload()">Reload</button>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="k">Camera</div><div class="v" id="running">—</div></div>
+    <div class="card"><div class="k">Viewers</div><div class="v" id="viewers">—</div></div>
+    <div class="card">
+      <div class="k">Motion</div><div class="v" id="score">—</div>
+      <div class="meter"><i id="meter"></i></div>
+    </div>
+    <div class="card"><div class="k">Events</div><div class="v" id="events">—</div></div>
+  </div>
+
+  <h2>Recent motion</h2>
+  <ul id="log"><li><span>nothing yet</span></li></ul>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let streaming = false, threshold = 6;
+
+function toggle() { streaming ? stop() : start(); }
+
+function start() {
+  streaming = true;
+  $('view').src = '/stream.mjpg?t=' + Date.now();
+  $('msg').style.display = 'none';
+  $('toggle').textContent = 'Stop stream';
+}
+
+function stop() {
+  streaming = false;
+  $('view').removeAttribute('src');   // drops the connection, releasing the camera
+  $('msg').style.display = 'grid';
+  $('msg').textContent = 'stream stopped';
+  $('toggle').textContent = 'Start stream';
+}
+
+function snap() {
+  if (streaming) stop();
+  $('view').src = '/snapshot.jpg?t=' + Date.now();
+  $('msg').style.display = 'none';
+}
+
+$('view').addEventListener('error', () => {
+  if (!streaming) return;
+  $('msg').style.display = 'grid';
+  $('msg').textContent = 'camera unavailable — the assistant may be using it';
+});
+
+async function poll() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    threshold = s.motion_threshold;
+    $('running').textContent = s.running ? 'live' : 'idle';
+    $('viewers').textContent = s.viewers;
+    $('score').textContent = s.motion_score.toFixed(1);
+    $('events').textContent = s.motion_events;
+    const pct = Math.min(100, (s.motion_score / (threshold * 2)) * 100);
+    const hot = s.motion_score >= threshold;
+    $('meter').style.width = pct + '%';
+    $('meter').classList.toggle('hot', hot);
+    $('dot').className = 'dot' + (hot ? ' motion' : (s.running ? ' live' : ''));
+    if (s.error && !s.running) { $('msg').textContent = s.error; }
+
+    const m = await (await fetch('/api/motion')).json();
+    $('log').innerHTML = m.events.length
+      ? m.events.map(e => `<li><span>${new Date(e.at * 1000).toLocaleTimeString()}</span>`
+                        + `<span class="score">${e.score}</span></li>`).join('')
+      : '<li><span>nothing yet</span></li>';
+  } catch { /* keep the last good values */ }
+}
+poll();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

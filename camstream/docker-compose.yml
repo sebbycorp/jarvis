@@ -1,0 +1,35 @@
+services:
+  camstream:
+    build: .
+    container_name: camstream
+    # starts on boot via the docker service, and comes back if it crashes
+    restart: unless-stopped
+    ports:
+      # 8080 is taken by the old picrawler-calib container
+      - "8081:8080"
+    environment:
+      CAM_WIDTH: "1280"
+      CAM_HEIGHT: "720"
+      CAM_FPS: "10"
+      # seconds to keep the camera after the last viewer leaves, so a
+      # reconnecting browser doesn't force a full stop/start cycle
+      CAM_IDLE_RELEASE_S: "5"
+      CAM_MOTION_THRESHOLD: "6.0"
+      CAM_MOTION_COOLDOWN_S: "5"
+    # libcamera needs the video/media nodes, the CMA heaps it allocates
+    # buffers from, and udev metadata to enumerate cameras at all.
+    devices:
+      - /dev/dma_heap:/dev/dma_heap
+    # Major numbers read off this host (stat /dev/video0 /dev/media0 ...) —
+    # guessing them gets "Operation not permitted" from libcamera even though
+    # /dev is mounted, because the cgroup denies the open.
+    device_cgroup_rules:
+      - "c 81:* rmw"    # video4linux  (/dev/video*)
+      - "c 237:* rmw"   # media        (/dev/media*)
+      - "c 252:* rmw"   # dma_heap     (/dev/dma_heap/*)
+      - "c 89:* rmw"    # i2c
+    volumes:
+      - /run/udev:/run/udev:ro
+      - /dev:/dev
+    # picamera2 maps large DMA buffers; the default 64MB is not enough
+    shm_size: "256m"
