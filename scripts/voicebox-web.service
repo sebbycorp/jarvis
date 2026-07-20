@@ -1,0 +1,17 @@
+[Unit]
+Description=Voice box web control panel
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smaniak
+WorkingDirectory=/home/smaniak/voicebox-app
+EnvironmentFile=-/home/smaniak/voicebox-app/.env
+ExecStart=/home/smaniak/voicebox-app/.venv/bin/python /home/smaniak/voicebox-app/web/app.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

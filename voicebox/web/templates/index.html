@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ name }} — voice box</title>
+<style>
+  :root { color-scheme: dark; --bg:#12141a; --card:#1b1e26; --line:#2b303c;
+          --fg:#e7e9ee; --dim:#9aa3b2; --accent:#5b9dff; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:1rem; background:var(--bg); color:var(--fg);
+         font:15px/1.5 system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size:1.4rem; margin:.2rem 0 1rem; }
+  h1 .dot { color:var(--accent); }
+  .card { background:var(--card); border:1px solid var(--line);
+          border-radius:12px; padding:1rem; margin-bottom:1rem; }
+  .card h2 { font-size:.8rem; text-transform:uppercase; letter-spacing:.06em;
+             color:var(--dim); margin:0 0 .75rem; }
+  input, select, button, textarea {
+    font:inherit; border-radius:8px; border:1px solid var(--line);
+    background:#232733; color:var(--fg); padding:.55rem .7rem; }
+  button { background:var(--accent); border-color:var(--accent); color:#0d1017;
+           font-weight:600; cursor:pointer; }
+  button.ghost { background:#232733; color:var(--fg); border-color:var(--line);
+                 font-weight:500; }
+  button:active { transform: translateY(1px); }
+  .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+  .row > .grow { flex:1 1 12rem; min-width:0; }
+  .stat { display:flex; justify-content:space-between; gap:1rem;
+          padding:.3rem 0; border-bottom:1px solid var(--line); }
+  .stat:last-child { border-bottom:0; }
+  .stat span:first-child { color:var(--dim); }
+  #reply { white-space:pre-wrap; margin-top:.75rem; padding:.75rem;
+           background:#232733; border-radius:8px; min-height:1.5rem; }
+  #reply.err { color:#ff8f8f; }
+  .meta { color:var(--dim); font-size:.8rem; margin-top:.4rem; }
+  img { max-width:100%; border-radius:8px; display:block; margin-top:.75rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="dot">●</span> {{ name }}</h1>
+
+  <div class="card">
+    <h2>Ask</h2>
+    <div class="row">
+      <input class="grow" id="q" placeholder="Ask anything…" autocomplete="off">
+      <select id="backend">
+        <option value="">default</option>
+        {% for b in backends %}<option value="{{ b }}">{{ b }}</option>{% endfor %}
+      </select>
+      <button onclick="ask()">Send</button>
+      <button class="ghost" onclick="ask(true)">Send &amp; speak</button>
+    </div>
+    <div id="reply"></div>
+    <div class="meta" id="replyMeta"></div>
+  </div>
+
+  <div class="card">
+    <h2>Speak</h2>
+    <div class="row">
+      <input class="grow" id="say" placeholder="Text to say aloud…" autocomplete="off">
+      <button onclick="speak()">Say it</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Music</h2>
+    <div class="row">
+      <input class="grow" id="track" placeholder="Track name (blank = everything)" autocomplete="off">
+      <button onclick="mus('play')">Play</button>
+      <button class="ghost" onclick="mus('skip')">Next</button>
+      <button class="ghost" onclick="mus('stop')">Stop</button>
+    </div>
+    <div class="row" style="margin-top:.6rem">
+      <label class="meta" for="vol">Volume</label>
+      <input type="range" id="vol" min="0" max="100" value="70"
+             class="grow" onchange="volume(this.value)">
+      <span class="meta" id="volLabel">70%</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div id="status"></div>
+    <div class="row" style="margin-top:.75rem">
+      <button class="ghost" onclick="refresh()">Refresh</button>
+      <button class="ghost" onclick="reset()">Clear context</button>
+      <button class="ghost" onclick="snap()">Camera snapshot</button>
+    </div>
+    <img id="shot" alt="" hidden>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function post(url, body) {
+  const r = await fetch(url, {method:'POST', headers:{'content-type':'application/json'},
+                             body: JSON.stringify(body || {})});
+  const data = await r.json().catch(() => ({error:'bad response'}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+async function ask(speakIt) {
+  const question = $('q').value.trim();
+  if (!question) return;
+  $('reply').className = ''; $('reply').textContent = '…'; $('replyMeta').textContent = '';
+  try {
+    const d = await post('/api/ask', {question, backend: $('backend').value, speak: !!speakIt});
+    $('reply').textContent = d.reply;
+    $('replyMeta').textContent = `via ${d.backend}${d.saw_image ? ' + vision' : ''}`;
+  } catch (e) {
+    $('reply').className = 'err'; $('reply').textContent = e.message;
+  }
+  refresh();
+}
+
+async function speak() {
+  const text = $('say').value.trim();
+  if (text) await post('/api/speak', {text}).catch(e => alert(e.message));
+}
+
+async function mus(action) {
+  try {
+    const d = await post('/api/music/' + action, {query: $('track').value.trim()});
+    if (d.error) alert(d.error);
+  } catch (e) { alert(e.message); }
+  refresh();
+}
+
+async function volume(v) {
+  $('volLabel').textContent = v + '%';
+  await post('/api/music/volume', {percent: Number(v)}).catch(e => alert(e.message));
+}
+
+async function reset() { await post('/api/reset'); $('reply').textContent = ''; }
+
+function snap() {
+  const img = $('shot');
+  img.hidden = false;
+  img.src = '/snapshot.jpg?t=' + Date.now();
+}
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    $('status').innerHTML = [
+      ['Backend', `${s.backend_label} (${s.backend})`],
+      ['Gateway', s.gateway_host],
+      ['Voice', s.tts],
+      ['Playing', s.music.playing || '—'],
+      ['Library', `${s.music.library_size} tracks`],
+    ].map(([k, v]) => `<div class="stat"><span>${k}</span><span>${v}</span></div>`).join('');
+  } catch { /* panel stays as-is if the box is busy */ }
+}
+
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
+$('say').addEventListener('keydown', e => { if (e.key === 'Enter') speak(); });
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

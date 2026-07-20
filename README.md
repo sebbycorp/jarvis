@@ -1,151 +1,162 @@
-# 🕷️ PiCrawler Control Stack
+# 🔊 Voice Box
 
-Control software for a **SunFounder PiCrawler** (8-servo quadruped spider robot)
-running on a **Raspberry Pi 4** at `172.16.10.117`. One shared control core drives
-four interfaces: an **MCP server** (remote agents), a **Claude Code skill**, a
-**web panel**, and an **OpenAI voice+video assistant**.
+An always-on AI voice assistant running on a **Raspberry Pi 4** at `172.16.10.117`.
+Speech stays on the device; thinking goes to **AgentGateway**, which fronts three
+model backends you can switch between by voice.
 
-## Architecture
+> **History:** this was a SunFounder PiCrawler spider robot. The legs broke, so the
+> robotics layer is gone (it's in git history if the drone rebuild ever happens).
+> The Pi, Robot HAT, speaker, mic and camera stayed — that's a voice box.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Interfaces                                                    │
-│   • MCP server (primary)  — FastMCP v3, HTTP :8000, systemd    │
-│   • Web panel             — Flask :5000 + MJPEG camera stream  │
-│   • AI assistant          — OpenAI Whisper + GPT-4o + TTS      │
-│   • Claude Code skill     — picrawler-control                  │
-├──────────────────────────────────────────────────────────────┤
-│  picrawler_ctl.py  — one clean, safe API (battery guard,       │
-│                       thread-safe, single HW owner)            │
-├──────────────────────────────────────────────────────────────┤
-│  SunFounder stack — robot-hat 2.5.x · vilib 0.3.18 · picrawler │
-├──────────────────────────────────────────────────────────────┤
-│  Hardware — I2C (HAT @0x14) · 8 servos · camera · speaker/mic  │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Every interface is a thin front-end over `robot/picrawler_ctl.py`.** Build/test
-the core once, reuse it four times.
-
-> ⚠️ **Only ONE interface may run at a time** — the MCP server, web panel, and AI
-> assistant each take exclusive ownership of the Robot HAT and camera. `picrawler-mcp`
-> is the default autostart service; stop it before running the web panel or assistant
-> (`make stop-all`).
-
-## Repository layout
+## How it works
 
 ```
-robot/                      # deployed to Pi:~/picrawler-app/
-├── picrawler_ctl.py        # shared core API + battery guard
-├── mcp_server.py           # FastMCP server (control/vision/tuning/code+deploy)
-├── web/app.py + templates/ # Flask panel + MJPEG stream
-├── ai_assistant.py         # OpenAI voice+video loop
-├── teleop.py               # keyboard drive (manual test)
-├── preflight.py            # health-check (run before operating)
-├── requirements.txt        # our pip deps (SunFounder libs are system-wide)
-└── config.example.env      # copy to .env on the Pi (holds OpenAI key etc.)
+   ┌──────────── on the Pi (no cloud, no API key) ────────────┐
+   │  mic → openWakeWord → webrtcvad → whisper.cpp (STT)      │
+   │                          ↓                                │
+   │                    intent router                          │
+   │              ┌───────────┴───────────┐                    │
+   │        local intents            everything else           │
+   │      (music, volume)                  │                   │
+   │                                       ▼                   │
+   └───────────────────────────────────────┼───────────────────┘
+                                           │  /chat/completions
+                    ┌──────────────────────▼──────────────────┐
+                    │  AgentGateway @ 172.16.10.155           │
+                    │   :31944 /spark  → Qwen3.6-35B (local)  │  ← default
+                    │   :30160 /openai → GPT-5.5              │
+                    │   :31397 /grok   → grok-4.5             │
+                    └──────────────────────┬──────────────────┘
+                                           ▼
+                       piper (TTS) → HAT hifiberry DAC → speaker
+```
+
+**Speech never leaves the Pi.** The gateway proxies `/chat/completions` only — no
+`/audio/*` routes — so STT and TTS are local by necessity, and by preference: no
+key on the device, no per-turn cost, and the box still hears you if WAN drops.
+
+## Talking to it
+
+Say the wake word (**"hey Jarvis"** by default), then talk.
+
+| You say | What happens |
+|---|---|
+| "what's the capital of Peru" | Answered by the default backend (local Qwen) |
+| "**ask Grok** why the sky is blue" | That one turn routes to Grok |
+| "**hey GPT**, write me a haiku" | That one turn routes to GPT-5.5 |
+| "**switch to Grok**" | Changes the default until told otherwise |
+| "what do you **see**?" | Grabs a camera frame, sends it to a vision-capable backend |
+| "**play** dark side of the moon" | Local library playback — never hits a model |
+| "volume up" / "set volume to 40" | ALSA mixer |
+| "next track" / "stop the music" | Playback control |
+| "forget our conversation" | Clears the rolling history |
+
+Local intents (music, volume, reset) are matched on-device, so they're instant and
+work with the gateway down.
+
+## Layout
+
+```
+voicebox/                   # deployed to Pi:~/voicebox-app/
+├── assistant.py            # the always-on loop + intent routing
+├── config.py               # all settings, read from .env
+├── llm.py                  # gateway router + voice-driven backend switching
+├── audio.py                # shared mic stream, speaker, HAT amp enable
+├── wake.py                 # openWakeWord + VAD utterance capture
+├── stt.py                  # whisper.cpp (resident model)
+├── tts.py                  # piper, with espeak fallback
+├── camera.py               # picamera2 stills
+├── music.py                # local library playback
+├── mcp_server.py           # FastMCP server for remote agents
+├── web/                    # Flask control panel
+└── preflight.py            # health check
 scripts/
-├── deploy.sh               # rsync robot/ -> Pi (excludes .env)
-└── picrawler-{mcp,web}.service   # systemd units
-docs/
-├── hardware-notes.md       # live device facts, versions, caveats
-└── superpowers/{specs,plans}/    # design + implementation plan
-Makefile                    # operational shortcuts (see `make help`)
+├── setup_pi.sh             # idempotent bootstrap (reflash insurance)
+├── deploy.sh               # rsync voicebox/ -> Pi (excludes .env)
+└── voicebox{,-mcp,-web}.service
+tests/                      # off-device unit tests (mocked audio)
 ```
 
-## Hardware facts (this device)
+## Setup
 
-- **OS:** Debian 13 "Trixie", 64-bit, **Python 3.13** (newer than SunFounder's
-  supported Bookworm — see caveats).
-- **Robot HAT** on I2C bus 1 at **`0x14`**. 8 servos (4 legs × 2), **no head servo**.
-- **Camera:** `/dev/video0` (picamera2 0.3.36). **Speaker:** onboard hifiberry DAC.
-- **Mic:** USB PnP Sound Device.
+On the laptop you need `ssh` + `rsync` and a `voicebox` SSH alias (key auth) in
+`~/.ssh/config` pointing at `smaniak@172.16.10.117`.
 
-### Trixie / Python 3.13 caveats
-- vilib's **local ML recognition** (face/hand/pose via mediapipe) is unavailable —
-  mediapipe/tflite don't support Python 3.13. Basic camera capture works; the AI
-  assistant "sees" via OpenAI cloud vision instead.
-- SunFounder libs are installed **system-wide** via their official installers; the
-  app venv is created with `--system-site-packages` to inherit them.
+```bash
+make deploy            # push code to the Pi
+make setup             # bootstrap: apt deps, venv, piper, whisper + wake models
+make preflight         # verify every subsystem
+make install-services  # systemd; the assistant autostarts on boot
+```
 
-## Setup (from scratch)
+`make setup` is idempotent — re-run it any time, and after a reflash.
 
-Prereqs on the laptop: `ssh`, `rsync`; the `pi-crawler` SSH alias (key auth) in
-`~/.ssh/config`. Then on the Pi (one time):
-
-1. **Enable I2C:** `dtparam=i2c_arm=on` in `/boot/firmware/config.txt`, reboot.
-2. **Install SunFounder stack** (system-wide):
-   ```bash
-   cd ~/sf
-   git clone -b 2.5.x --depth 1 https://github.com/sunfounder/robot-hat && \
-     cd robot-hat && sudo python3 install.py && sudo bash i2samp.sh
-   git clone --depth 1 https://github.com/sunfounder/vilib && \
-     cd ../vilib && sudo python3 install.py
-   git clone --depth 1 https://github.com/sunfounder/picrawler && \
-     sudo pip3 install ~/sf/picrawler --break-system-packages
-   ```
-3. **App venv + our deps:**
-   ```bash
-   python3 -m venv --system-site-packages ~/picrawler-app/.venv
-   ~/picrawler-app/.venv/bin/pip install -r ~/picrawler-app/requirements.txt
-   ```
-4. **Deploy + services:** `make deploy && make install-services`
-5. **Config:** `cp ~/picrawler-app/config.example.env ~/picrawler-app/.env` and edit.
+Config lives in `~/voicebox-app/.env` (created from `config.example.env`). There is
+**no API key in it**: the gateway holds the upstream credentials.
 
 ## Operating
 
 ```bash
 make help          # list all shortcuts
-make preflight     # health-check: I2C, battery, camera, imports, service
-make deploy        # push code changes to the Pi
-make walk          # quick 2-step forward test (respects battery guard)
-make status        # controller status + battery voltage
-make logs          # tail MCP service logs
-make restart       # restart MCP service
-make stop-all      # free the HAT/camera for web/ai
+make run           # run the assistant in the foreground (see live turns)
+make logs          # follow the service logs
+make ask Q="..."   # one text turn, no mic — quickest way to test the gateway
+make say TEXT="hi" # speak something through the box
+make gateway       # check all three model routes from your laptop
+make devices       # list audio inputs (to set VOICEBOX_MIC_DEVICE)
+make stop-all      # free the mic/speaker
 ```
 
-### Via MCP (Claude Code / other agents)
+### Web panel
+`make stop-all && make web`, then open `http://172.16.10.117:5000`.
+Ask, speak, control music, snapshot the camera, switch backends.
+
+### Via MCP (Claude Code and other agents)
 ```bash
-make mcp-add       # claude mcp add --transport http picrawler http://172.16.10.117:8000/mcp
+make mcp-add   # claude mcp add --transport http voicebox http://172.16.10.117:8000/mcp
 ```
-Tools: `forward/backward/turn_left/turn_right/stand/rest/stop`, `pose(name)`,
-`capture_image`, `speak`, `status`, `battery`, `set_speed`, `calibrate_leg`,
-`list_files/read_file/write_file`, `restart_robot_service`.
+Tools: `speak`, `listen`, `ask(question, backend)`, `set_backend`,
+`reset_conversation`, `capture_image`, `take_photo`, `play_music`, `stop_music`,
+`skip_track`, `set_volume`, `status`, `list_files/read_file/write_file`,
+`restart_service`.
 
-### Via web panel
-`make stop-all && make web`, then open `http://172.16.10.117:5000` on a phone/laptop.
+> ⚠️ **One process owns the mic at a time.** The assistant, the MCP server's
+> `listen`, and the web panel all contend for it. Leave the assistant as the
+> autostart service and `make stop-all` before running another in the foreground.
 
-### Via AI assistant
-Add `OPENAI_API_KEY` to `~/picrawler-app/.env`, then `make ai` and talk to it.
+## Tuning
 
-## ⚠️ Battery safety
+Measured on the Pi 4: **~2.7 s** from end of speech to spoken reply
+(STT 2.0 s + model 0.7 s). Music and volume answer in ~0.05 s — they never
+leave the box.
 
-The robot **browns out and the Pi loses power** if the battery is weak — this is the
-#1 operational hazard. `picrawler_ctl` includes a **voltage guard** that refuses to
-move below `PICRAWLER_MIN_BATTERY_V` (default **6.8V**, 2S pack). Always run
-`make preflight` (or check `battery()`) before operating, and keep the 2× 18650
-cells charged. Override the guard only if you know what you're doing:
-`set_battery_guard(False)`.
+| Symptom | Knob |
+|---|---|
+| Triggers on the TV | Raise `VOICEBOX_WAKE_THRESHOLD` (0.5 → 0.7) |
+| Doesn't hear the wake word | Lower it, or check `make devices` / `VOICEBOX_MIC_DEVICE` |
+| Cuts you off mid-sentence | Raise `VOICEBOX_SILENCE_TAIL_S` |
+| Waits too long before replying | Lower `VOICEBOX_SILENCE_TAIL_S` |
+| Replies are too long-winded | Lower `VOICEBOX_MAX_TOKENS`, tighten `VOICEBOX_SYSTEM_PROMPT` |
+| Transcription is poor | Use `ggml-base.en.bin` (2.5x slower here, no better on short commands) |
+| STT feels slow | `VOICEBOX_WHISPER_AUDIO_CTX` is the big lever — see `docs/hardware-notes.md` |
 
 ## Security notes
 
-The MCP server is **unauthenticated on the LAN by default** (trusted-lab choice) and
-exposes code read/write + service restart. To require a token, set `MCP_AUTH_TOKEN`
-in `.env` (clients then send `Authorization: Bearer <token>`). Inputs are sanitized
-against path traversal (photo names) and shell injection (`speak` text). The real
-`.env` (with your API key) is git-ignored and never synced by `deploy.sh`.
+The MCP server is **unauthenticated on the LAN by default** (trusted-lab choice)
+and exposes file read/write plus service restart, scoped to the app dir. Set
+`MCP_AUTH_TOKEN` in `.env` to require `Authorization: Bearer <token>`. Photo names
+are sanitized against path traversal and TTS text is never passed through a shell.
+The real `.env` is git-ignored and excluded from `deploy.sh`.
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| Pi unreachable right after a move | Battery brownout — charge the pack, power-cycle |
-| `make walk` errors "battery … < minimum" | Guard working as intended — charge |
-| No movement / import errors | Check `sudo i2cdetect -y 1` shows HAT at `0x14` |
+| Silent box | HAT amp not enabled — `sudo bash ~/sf/robot-hat/i2samp.sh`, reboot |
+| `piper: not found` | Re-run `make setup`; falls back to espeak meanwhile |
+| "couldn't reach the model gateway" | `make gateway` — check AgentGateway on `172.16.10.155` |
 | Camera errors | venv must be `--system-site-packages` (system picamera2) |
-| TTS silent | Onboard speaker = hifiberry DAC; check `/etc/asound.conf` |
-| Two interfaces fighting | Only one may own the HAT/camera — `make stop-all` first |
+| Wake word never fires | `make preflight` — openwakeword models may not have downloaded |
+| Two things fighting for the mic | `make stop-all` first |
 
-See `docs/hardware-notes.md` for the full device log and `docs/superpowers/` for the
-design spec and implementation plan.
+See `docs/hardware-notes.md` for the device log.

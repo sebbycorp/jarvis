@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Deploy robot/ -> Pi:~/picrawler-app/ (excludes secrets, venv, photos).
-# Uses the 'pi-crawler' SSH alias (key auth). Override host with PI=user@host.
+# Deploy voicebox/ -> Pi:~/voicebox-app/ (excludes secrets, venv, models, media).
+# Uses the 'voicebox' SSH alias (key auth). Override host with PI=user@host.
 set -euo pipefail
-PI="${PI:-pi-crawler}"
-SRC="$(cd "$(dirname "$0")/../robot" && pwd)/"
+PI="${PI:-voicebox}"
+SRC="$(cd "$(dirname "$0")/../voicebox" && pwd)/"
 rsync -az --delete \
-  --exclude '.venv' --exclude '.env' --exclude 'photos' --exclude '__pycache__' \
+  --exclude '.venv' --exclude '.env' --exclude '__pycache__' \
+  --exclude 'models' --exclude 'music' --exclude 'photos' \
   -e "ssh -o StrictHostKeyChecking=accept-new" \
-  "$SRC" "$PI:picrawler-app/"
-echo "deployed $SRC -> $PI:~/picrawler-app/"
+  "$SRC" "$PI:voicebox-app/"
+echo "deployed $SRC -> $PI:~/voicebox-app/"

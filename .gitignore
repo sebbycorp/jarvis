@@ -1,6 +1,11 @@
-# Never commit robot secrets or local artifacts
-robot/.env
+# Never commit secrets or local artifacts
 **/.env
 **/__pycache__/
-**/photos/
 *.pyc
+
+# Device-local media and models (large, downloaded by scripts/setup_pi.sh)
+**/photos/
+**/models/
+**/music/
+tests/.appdir/
+.venv/

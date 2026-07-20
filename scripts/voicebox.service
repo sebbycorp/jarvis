@@ -1,0 +1,18 @@
+[Unit]
+Description=Voice box — always-on wake-word assistant
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=smaniak
+WorkingDirectory=/home/smaniak/voicebox-app
+EnvironmentFile=-/home/smaniak/voicebox-app/.env
+ExecStart=/home/smaniak/voicebox-app/.venv/bin/python /home/smaniak/voicebox-app/assistant.py
+Restart=on-failure
+RestartSec=5
+# unbuffered so journalctl shows turns as they happen
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
