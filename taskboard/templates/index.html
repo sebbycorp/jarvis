@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Board</title>
+<style>
+  :root { color-scheme: dark; --bg:#0e1015; --card:#171a21; --line:#262a34;
+          --fg:#e9ebf0; --dim:#8d97a6; --queued:#7c8cff; --running:#ffb44d;
+          --done:#3ddc84; --failed:#ff6b6b; --cancelled:#6b7280; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:1rem; background:var(--bg); color:var(--fg);
+         font:14px/1.55 system-ui,-apple-system,sans-serif; }
+  header { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap;
+           max-width:1500px; margin:0 auto .9rem; }
+  h1 { font-size:1.2rem; margin:0; font-weight:600; }
+  .meta { color:var(--dim); font-size:.85rem; }
+  .meta b { color:var(--fg); font-weight:600; font-variant-numeric:tabular-nums; }
+  .spacer { flex:1; }
+  button { font:inherit; font-size:.85rem; border-radius:7px; padding:.35rem .7rem;
+           cursor:pointer; border:1px solid var(--line); background:#20242e; color:var(--fg); }
+  .board { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.85rem;
+           max-width:1500px; margin:0 auto; align-items:start; }
+  @media (max-width:900px){ .board{grid-template-columns:1fr;} }
+  .col { background:#12151b; border:1px solid var(--line); border-radius:12px;
+         padding:.7rem; min-height:6rem; }
+  .col h2 { font-size:.72rem; text-transform:uppercase; letter-spacing:.07em;
+            margin:.1rem 0 .7rem; display:flex; align-items:center; gap:.45rem; }
+  .pip { width:.5rem; height:.5rem; border-radius:50%; flex:none; }
+  .n { margin-left:auto; color:var(--dim); font-variant-numeric:tabular-nums; }
+  .card { background:var(--card); border:1px solid var(--line); border-left:3px solid var(--line);
+          border-radius:9px; padding:.6rem .7rem; margin-bottom:.55rem; }
+  .card.queued   { border-left-color:var(--queued); }
+  .card.running  { border-left-color:var(--running); }
+  .card.done     { border-left-color:var(--done); }
+  .card.failed   { border-left-color:var(--failed); }
+  .card.cancelled{ border-left-color:var(--cancelled); opacity:.6; }
+  .prompt { font-weight:500; word-break:break-word; }
+  .tags { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.45rem; }
+  .tag { font-size:.7rem; color:var(--dim); background:#1e222b; border-radius:5px;
+         padding:.1rem .4rem; font-variant-numeric:tabular-nums; }
+  .tag.repo { color:#b6c2ff; } .tag.cost { color:#ffd48a; }
+  .out { margin-top:.5rem; padding:.45rem .55rem; background:#10131a; border-radius:6px;
+         color:var(--dim); font-size:.8rem; white-space:pre-wrap; word-break:break-word;
+         max-height:7.5rem; overflow:auto; }
+  .out.err { color:#ffb3b3; }
+  .empty { color:var(--dim); font-size:.82rem; padding:.4rem .1rem; }
+  .running .prompt::after { content:''; display:inline-block; width:.45rem; height:.45rem;
+      margin-left:.4rem; border-radius:50%; background:var(--running);
+      animation:pulse 1.1s ease-in-out infinite; vertical-align:middle; }
+  @keyframes pulse { 0%,100%{opacity:.25;} 50%{opacity:1;} }
+  a.x { color:var(--dim); text-decoration:none; float:right; padding-left:.5rem; }
+  a.x:hover { color:var(--failed); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Board</h1>
+  <span class="meta" id="summary">—</span>
+  <span class="spacer"></span>
+  <button onclick="clearDone()">Clear finished</button>
+</header>
+<div class="board" id="board"></div>
+
+<script>
+const COLS = [["queued","Queued"],["running","Running"],["done","Done"],["failed","Failed"]];
+const esc = s => (s ?? "").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function since(t){ if(!t) return ""; const s=Math.max(0,Date.now()/1000-t);
+  if(s<60) return Math.round(s)+"s"; if(s<3600) return Math.round(s/60)+"m"; return (s/3600).toFixed(1)+"h"; }
+
+function duration(t){
+  if(t.state==="running") return since(t.claimed_at)+" running";
+  if(t.finished_at && t.claimed_at) return Math.round(t.finished_at-t.claimed_at)+"s";
+  return since(t.created_at)+" ago";
+}
+
+function card(t){
+  const body = t.state==="failed" ? (t.error||t.output) : t.output;
+  return `<div class="card ${t.state}">
+    <div class="prompt">${t.state==="queued"?`<a class="x" title="cancel" onclick="cancel('${t.id}')">✕</a>`:""}${esc(t.prompt)}</div>
+    <div class="tags">
+      ${t.repo?`<span class="tag repo">${esc(t.repo)}</span>`:""}
+      ${t.branch?`<span class="tag">⑂ ${esc(t.branch)}</span>`:""}
+      ${t.model?`<span class="tag">${esc(t.model)}</span>`:""}
+      <span class="tag">${duration(t)}</span>
+      ${t.turns?`<span class="tag">${t.turns} turns</span>`:""}
+      ${t.cost_usd?`<span class="tag cost">$${t.cost_usd.toFixed(3)}</span>`:""}
+    </div>
+    ${body?`<div class="out ${t.state==="failed"?"err":""}">${esc(String(body).slice(0,600))}</div>`:""}
+  </div>`;
+}
+
+async function refresh(){
+  let d; try { d = await (await fetch('/api/tasks')).json(); } catch { return; }
+  document.getElementById('board').innerHTML = COLS.map(([k,label])=>{
+    const items = d.tasks.filter(t=>t.state===k);
+    return `<div class="col"><h2><span class="pip" style="background:var(--${k})"></span>${label}
+      <span class="n">${items.length}</span></h2>
+      ${items.length?items.map(card).join(""):'<div class="empty">nothing here</div>'}</div>`;
+  }).join("");
+  const c = d.counts;
+  document.getElementById('summary').innerHTML =
+    `<b>${c.running}</b> running · <b>${c.queued}</b> queued · <b>${c.done}</b> done`
+    + (c.failed?` · <b>${c.failed}</b> failed`:"")
+    + ` · <b>$${d.cost_usd.toFixed(3)}</b> total`;
+}
+async function cancel(id){ await fetch(`/api/tasks/${id}/cancel`,{method:'POST'}); refresh(); }
+async function clearDone(){ await fetch('/api/tasks/clear',{method:'POST'}); refresh(); }
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>

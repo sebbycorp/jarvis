@@ -144,3 +144,58 @@ def set_backend(backend: str) -> dict:
     router = llm.get_router()
     router.set_default(backend)
     return {"backend": backend, "label": router.label()}
+
+
+# ==== agent tasks ==========================================================
+# These queue work for the grok CLI running on the workstation. The box never
+# runs the agent itself — it only holds the queue and the board.
+def _board(path: str, method: str = "get", **kw):
+    import requests
+    if not config.TASKBOARD_URL.strip():
+        return {"error": "no task board configured"}
+    url = config.TASKBOARD_URL.rstrip("/") + path
+    try:
+        r = getattr(requests, method)(url, timeout=15, **kw)
+    except Exception as e:
+        return {"error": f"task board unreachable: {e}"}
+    if r.status_code >= 400:
+        return {"error": f"task board returned {r.status_code}"}
+    try:
+        return r.json()
+    except ValueError:
+        return {"error": "task board sent a bad response"}
+
+
+@tool("dispatch_task",
+      "Hand a coding or automation task to the Grok agent running on the "
+      "workstation. Use for anything the user wants BUILT or CHANGED in a "
+      "repository, not for questions you can answer yourself.",
+      {"task": {"type": "string",
+                "description": "what the agent should do, in full"},
+       "repo": {"type": "string",
+                "description": "which repository, e.g. k8s-goose or jarvis"}},
+      ["task"])
+def dispatch_task(task: str, repo: str = "") -> dict:
+    result = _board("/api/tasks", "post",
+                    json={"prompt": task, "repo": repo, "source": "voice"})
+    if "error" in result:
+        return result
+    return {"queued": True, "id": result.get("id"),
+            "repo": repo or "(worker default)"}
+
+
+@tool("list_tasks", "Report what the Grok agents are working on right now.")
+def list_tasks() -> dict:
+    data = _board("/api/tasks")
+    if "error" in data:
+        return data
+    tasks = data.get("tasks", [])
+    def brief(t):
+        return {"id": t["id"], "state": t["state"], "task": t["prompt"][:120],
+                "repo": t.get("repo", "")}
+    return {"counts": data.get("counts", {}),
+            "cost_usd": data.get("cost_usd", 0),
+            "active": [brief(t) for t in tasks
+                       if t["state"] in ("queued", "running")][:8],
+            "recent": [brief(t) for t in tasks
+                       if t["state"] not in ("queued", "running")][:4]}

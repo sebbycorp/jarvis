@@ -63,6 +63,11 @@ HISTORY_TURNS = _i("VOICEBOX_HISTORY_TURNS", 6)
 TOOLS_ENABLED = _b("VOICEBOX_TOOLS_ENABLED", True)
 MAX_TOOL_ROUNDS = _i("VOICEBOX_MAX_TOOL_ROUNDS", 3)
 
+# ---- agent task board ------------------------------------------------------
+# Voice-dispatched coding tasks are queued here; a worker on the workstation
+# claims them and runs the grok CLI. Empty disables the dispatch tools.
+TASKBOARD_URL = _s("VOICEBOX_TASKBOARD_URL", "http://127.0.0.1:8090")
+
 # Qwen is a reasoning model: left alone it spends the whole token budget
 # thinking and returns empty `content`. A voice assistant wants the answer, not
 # the deliberation, so thinking is off by default.

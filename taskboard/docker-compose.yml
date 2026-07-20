@@ -1,0 +1,17 @@
+services:
+  taskboard:
+    build: .
+    container_name: taskboard
+    restart: unless-stopped
+    ports:
+      # 8081 is camstream; 8080 is free again since picrawler-calib went
+      - "8090:8080"
+    environment:
+      TASKBOARD_STATE: /data/tasks.json
+      # a claimed task with no word from the worker for this long is marked
+      # failed — otherwise a slept workstation leaves the board lying
+      TASKBOARD_STALE_AFTER_S: "1800"
+    volumes:
+      - taskboard-data:/data
+volumes:
+  taskboard-data:
