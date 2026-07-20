@@ -11,7 +11,7 @@ voice box. What remains in use:
 |---|---|---|
 | Raspberry Pi 4 | ✅ | everything |
 | Robot HAT (I2C `0x14`) | ✅ | speaker amp enable pin, battery ADC |
-| hifiberry DAC (PCM5102A) | ✅ | speaker output |
+| hifiberry DAC (PCM5102A) | ✅ | digital audio out (amp/speaker after it is dead) |
 | USB PnP Sound Device | ✅ | microphone |
 | Camera `/dev/video0` | ❌ see below | disabled in `.env` |
 | 8× leg servos | ❌ broken | — |
@@ -79,10 +79,12 @@ Cards as of 2026-07-20:
   reboot manually.
 - `/etc/asound.conf` sets `pcm.!default robothat`, a plug → softvol → dmix chain
   onto the hifiberry. So plain `aplay` (no `-D`) already hits the right speaker.
-- **The mixer control is named `robot-hat speaker Playback Volume`** — a softvol,
-  not a hardware control. There is no `Master`, `PCM`, or `Digital` on this box,
-  so code that guesses those names silently fails to change volume.
-  `music.mixer_controls()` discovers it via `amixer scontrols` instead.
+- **The speaker's mixer control is `robot-hat speaker` on card 3** — a softvol,
+  not a hardware control. Two traps here: the usual names (`Master`, `PCM`,
+  `Digital`) don't exist for it, *and* bare `amixer scontrols` reports card 0's
+  controls, so `amixer -M sset Master` "succeeds" while adjusting a different
+  device entirely. `music.mixer_controls()` sweeps every card and returns
+  `(card, name)` pairs; volume changes must pass `-c <card>`.
 - The mic was **card 3 in the 2026-07-18 notes and card 4 today** — USB card
   indices drift across reboots. Pin `VOICEBOX_MIC_DEVICE` to the device *name*
   (a substring match works) rather than an index.
@@ -119,10 +121,9 @@ Don't drop to 512 without lowering `MAX_UTTERANCE_S` to match.
 occurred historically (not active). If STT times regress, check this first.
 
 ## Speech stack (all local)
-- **STT:** whisper.cpp via `pywhispercpp`, model `ggml-base.en.bin`. The binding
-  keeps the model resident — a Pi 4 spends ~1s per turn just reloading `base.en`
-  from disk with the CLI. Drop to `ggml-tiny.en.bin` if latency matters more than
-  accuracy.
+- **STT:** whisper.cpp via `pywhispercpp`, model `ggml-tiny.en.bin` with
+  `audio_ctx=768` (see the latency table above). The binding keeps the model
+  resident — the CLI would reload it from disk every turn.
 - **TTS:** piper, voice `en_US-amy-medium`. Outputs raw s16 on stdout at the
   voice's own sample rate — read it from the sidecar `.onnx.json`, don't assume
   22050.
