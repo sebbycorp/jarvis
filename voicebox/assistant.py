@@ -126,9 +126,15 @@ class Assistant:
                     if not self.wake.wait(frames):
                         break
                     print(f"👂 listening… (wake {self.wake.last_score:.2f})")
-                    # include the audio from just before the trigger, or a
-                    # request run straight into the wake word loses its start
-                    pcm = mic.preroll() + self.recorder.record(frames)
+                    # Grab the pre-roll first: it holds the moment before the
+                    # trigger, so a request run straight into the wake word
+                    # doesn't lose its start. Then beep, then drop whatever the
+                    # mic picked up meanwhile — otherwise our own blip lands at
+                    # the head of the recording and the VAD reads it as speech.
+                    preroll = mic.preroll()
+                    audio.play_earcon()
+                    mic.flush()
+                    pcm = preroll + self.recorder.record(frames)
                     if not pcm:
                         continue
 

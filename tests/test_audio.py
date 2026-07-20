@@ -261,3 +261,39 @@ class TestPreroll(unittest.TestCase):
 
     def test_preroll_is_empty_before_any_audio(self):
         self.assertEqual(self._mic().preroll(), b"")
+
+
+@unittest.skipUnless(HAS_NUMPY, "needs real numpy")
+class TestEarcon(unittest.TestCase):
+    def test_length_matches_the_configured_duration(self):
+        audio._earcon_cache = None
+        expected = int(config.SAMPLE_RATE * config.EARCON_MS / 1000)
+        self.assertEqual(len(audio.earcon()), expected * 2)
+
+    def test_starts_and_ends_near_silence(self):
+        # a raw sine at full amplitude clicks audibly on a small speaker
+        audio._earcon_cache = None
+        pcm = np.frombuffer(audio.earcon(), dtype=np.int16)
+        self.assertLess(abs(int(pcm[0])), 500)
+        self.assertLess(abs(int(pcm[-1])), 500)
+
+    def test_has_actual_signal_in_the_middle(self):
+        audio._earcon_cache = None
+        pcm = np.frombuffer(audio.earcon(), dtype=np.int16)
+        self.assertGreater(np.abs(pcm[len(pcm) // 2 - 50:len(pcm) // 2 + 50]).max(), 1000)
+
+    def test_is_cached_between_calls(self):
+        audio._earcon_cache = None
+        self.assertIs(audio.earcon(), audio.earcon())
+
+    def test_disabled_earcon_plays_nothing(self):
+        with mock.patch.object(audio.config, "EARCON", False), \
+             mock.patch.object(audio.subprocess, "run") as run:
+            audio.play_earcon()
+        run.assert_not_called()
+
+    def test_playback_failure_never_raises(self):
+        # a failed blip must not break the turn it is announcing
+        with mock.patch.object(audio.config, "EARCON", True), \
+             mock.patch.object(audio, "enable_speaker", side_effect=RuntimeError("boom")):
+            audio.play_earcon()

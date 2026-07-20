@@ -108,6 +108,11 @@ AUDIO_OUT = _s("VOICEBOX_AUDIO_OUT", "default")
 # dBFS despite peaking at 0; this lifts it ~6 dB so it carries on a small
 # speaker. Turn off if you have a good amp and prefer untouched dynamics.
 OUTPUT_COMPAND = _b("VOICEBOX_OUTPUT_COMPAND", True)
+# Short tone played the instant the wake word fires. Without it you talk into
+# silence with no idea whether the box heard you.
+EARCON = _b("VOICEBOX_EARCON", True)
+EARCON_HZ = _i("VOICEBOX_EARCON_HZ", 880)
+EARCON_MS = _i("VOICEBOX_EARCON_MS", 120)
 PLAY_CMD = _s("VOICEBOX_PLAY_CMD", "")  # empty = build it from AUDIO_OUT
 # The SunFounder HAT needs GPIO20 raised to power its amplifier. Harmless to
 # leave on with other hardware, but turn it off if you drop the HAT entirely.

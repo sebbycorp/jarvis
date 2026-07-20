@@ -311,6 +311,47 @@ def play_file(path: str) -> Playback:
     return Playback(path)
 
 
+_earcon_cache: bytes | None = None
+
+
+def earcon() -> bytes:
+    """A short sine blip with a raised-cosine envelope.
+
+    Generated rather than shipped as a file, and the envelope matters: a raw
+    sine that starts and stops at full amplitude clicks audibly on a small
+    speaker.
+    """
+    global _earcon_cache
+    if _earcon_cache is not None:
+        return _earcon_cache
+    n = int(config.SAMPLE_RATE * config.EARCON_MS / 1000)
+    t = np.arange(n) / config.SAMPLE_RATE
+    wave = np.sin(2 * np.pi * config.EARCON_HZ * t)
+    fade = max(1, n // 8)
+    envelope = np.ones(n)
+    ramp = 0.5 * (1 - np.cos(np.linspace(0, np.pi, fade)))
+    envelope[:fade] = ramp
+    envelope[-fade:] = ramp[::-1]
+    _earcon_cache = (wave * envelope * 8000).astype(np.int16).tobytes()
+    return _earcon_cache
+
+
+def play_earcon() -> None:
+    """Signal 'I'm listening'. Never let a failed blip break a turn."""
+    if not config.EARCON:
+        return
+    try:
+        enable_speaker()
+        # bypass compress(): the tone is already at a chosen level, and running
+        # it through compand would just add latency to the one thing that must
+        # be instant
+        subprocess.run(play_command(config.SAMPLE_RATE), input=earcon(),
+                       check=False, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=5)
+    except Exception:
+        pass
+
+
 def list_devices() -> str:
     lines = ["--- inputs (sounddevice) ---", str(sd.query_devices()),
              "", "--- outputs (aplay -l) ---"]
