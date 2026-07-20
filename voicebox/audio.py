@@ -124,12 +124,27 @@ class Microphone:
         self._q.append(bytes(indata))
         self._event.set()
 
-    def __enter__(self) -> "Microphone":
-        kwargs = {"device": self.device} if self.device is not None else {}
-        self._stream = sd.RawInputStream(
+    def _open(self, device):
+        kwargs = {"device": device} if device is not None else {}
+        stream = sd.RawInputStream(
             samplerate=self.rate, blocksize=self.blocksize,
             channels=1, dtype="int16", callback=self._callback, **kwargs)
-        self._stream.start()
+        stream.start()
+        return stream
+
+    def __enter__(self) -> "Microphone":
+        try:
+            self._stream = self._open(self.device)
+        except Exception as e:
+            # A named device disappears from PortAudio's list while another
+            # process holds it, so a transient `arecord` used to crash the whole
+            # service. Fall back to the default input rather than dying — being
+            # deaf for a moment beats not running.
+            if self.device is None:
+                raise
+            print(f"⚠️  mic {self.device!r} unavailable ({e}); using default input")
+            self._stream = self._open(None)
+            self.device = None
         return self
 
     def __exit__(self, *exc) -> None:

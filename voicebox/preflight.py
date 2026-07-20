@@ -48,8 +48,11 @@ def check_mic() -> None:
     except Exception as e:
         report(FAIL, "microphone", str(e), essential=True)
         return
-    if not ins:
-        report(FAIL, "microphone", "no input devices", essential=True)
+    if not ins or all(d["name"] in ("default", "pulse", "sysdefault")
+                      for d in ins):
+        report(FAIL, "microphone",
+               "no capture hardware — is the USB mic plugged in? (arecord -l)",
+               essential=True)
         return
     report(OK, "microphone", f"{len(ins)} input(s): {ins[0]['name']}")
 
@@ -57,12 +60,14 @@ def check_mic() -> None:
 def check_speaker() -> None:
     import audio
     enabled = audio.enable_speaker()
-    play = config.PLAY_CMD.split()[0]
+    # PLAY_CMD is empty by default now (the command is built from AUDIO_OUT),
+    # so read the binary off the real command rather than splitting the config.
+    play = audio.play_command(config.SAMPLE_RATE)[0]
     if not shutil.which(play):
         report(FAIL, "speaker", f"{play} not installed", essential=True)
         return
-    report(OK, "speaker", f"{play}"
-           + (" (HAT amp enabled)" if enabled else " (HAT amp not available)"))
+    report(OK, "speaker", f"{play} -> {audio.output_device()}"
+           + (" (HAT amp enabled)" if enabled else " (no HAT amp)"))
 
 
 def check_stt() -> None:
@@ -128,17 +133,28 @@ def check_camera() -> None:
 def check_music() -> None:
     import music
     n = len(music.get_player().library())
-    if not shutil.which("ffplay"):
-        report(WARN, "music", "ffplay not installed")
+    if not shutil.which("ffmpeg"):  # decoder for the ffmpeg|aplay pipeline
+        report(WARN, "music", "ffmpeg not installed — playback unavailable")
         return
     report(OK if n else WARN, "music",
            f"{n} track(s) in {config.MUSIC_DIR}")
 
 
+def check_compand() -> None:
+    if not config.OUTPUT_COMPAND:
+        report(WARN, "loudness", "compand disabled")
+        return
+    if not shutil.which("sox"):
+        report(WARN, "loudness", "sox missing — speech will be ~6dB quieter")
+        return
+    report(OK, "loudness", "sox compand (+6dB RMS)")
+
+
 def main() -> None:
     print(f"— {config.WAKE_NAME} preflight —  app dir: {config.APP_DIR}\n")
-    for check in (check_mic, check_speaker, check_stt, check_tts, check_wake,
-                  check_vad, check_camera, check_music, check_gateway):
+    for check in (check_mic, check_speaker, check_compand, check_stt,
+                  check_tts, check_wake, check_vad, check_camera, check_music,
+                  check_gateway):
         try:
             check()
         except Exception as e:  # a broken check must not hide the others

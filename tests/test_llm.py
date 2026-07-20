@@ -38,6 +38,46 @@ class TestParseRoute(unittest.TestCase):
         # "grok" alone would otherwise route an empty prompt to the gateway
         self.assertEqual(llm.parse_route("grok"), (None, "grok", False))
 
+    def test_wake_word_residue_does_not_block_routing(self):
+        # Verbatim from the Pi: saying "hey jarvis, ask grok why is the sky
+        # blue" transcribed as this, and start-anchored matching sent it to
+        # the wrong backend.
+        self.assertEqual(
+            llm.parse_route("This asks Grock, why is the sky blue?"),
+            ("grok", "why is the sky blue?", False))
+
+    def test_other_wake_residue_shapes(self):
+        for text in ["Hey Jarvis, ask Grok why the sky is blue",
+                     "Jarvis ask Grok why the sky is blue",
+                     "Charvis, ask Groc why the sky is blue",
+                     "ask Grok why the sky is blue"]:
+            with self.subTest(text=text):
+                backend, rest, _ = llm.parse_route(text)
+                self.assertEqual(backend, "grok")
+                self.assertEqual(rest.lower().rstrip("?"),
+                                 "why the sky is blue")
+
+    def test_residue_is_stripped_from_unrouted_questions_too(self):
+        # the wake word must never reach the model as part of the prompt
+        self.assertEqual(llm.parse_route("Hey Jarvis, what time is it"),
+                         (None, "what time is it", False))
+
+    def test_a_wake_word_alone_leaves_nothing(self):
+        self.assertEqual(llm.strip_wake_residue("Hey Jarvis"), "")
+
+    def test_real_words_are_not_eaten_as_residue(self):
+        for text in ["hey there, what is the time",
+                     "this is a test of the system",
+                     "the capital of Peru is what"]:
+            with self.subTest(text=text):
+                kept = llm.strip_wake_residue(text)
+                self.assertTrue(len(kept.split()) >= len(text.split()) - 2,
+                                f"over-stripped: {text!r} -> {kept!r}")
+
+    def test_switch_still_works_after_residue(self):
+        self.assertEqual(llm.parse_route("Hey Jarvis, switch to Grok"),
+                         ("grok", "", True))
+
 
 class TestNormalize(unittest.TestCase):
     def test_strips_markdown_that_would_be_read_aloud(self):

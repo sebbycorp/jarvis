@@ -35,10 +35,21 @@ ALIASES: dict[str, str] = {
 }
 _ALIAS_RE = "|".join(sorted((re.escape(a) for a in ALIASES), key=len, reverse=True))
 
-# "ask grok ...", "hey gpt, ..." -> route one turn
-_ONE_SHOT_RE = re.compile(
-    rf"^\s*(?:hey\s+|ok\s+)?(?:ask|use|try|query)?\s*({_ALIAS_RE})\b[,:]?\s*(.*)$",
-    re.I | re.S)
+# The recorder starts mid-wake-word, so whisper prepends junk: "hey jarvis, ask
+# grok ..." comes through as "This asks Grock, ...". Routing therefore cannot be
+# anchored to the start of the utterance — it looks for an ask-verb followed by
+# a backend name anywhere in the sentence, and treats the remainder as the
+# prompt. Verb forms are loose ("asks", "asked") for the same reason.
+_ASK_VERBS = r"ask|asks|asked|use|uses|using|try|tries|query|queries|tell|tells"
+_ONE_SHOT_PATTERNS = (
+    # "…ask grok why the sky is blue"  (the common case, wake-residue tolerant)
+    re.compile(rf"\b(?:{_ASK_VERBS})\s+({_ALIAS_RE})\b[,:]?\s*(.*)$", re.I | re.S),
+    # "hey grok why is the sky blue" — a greeting makes the name unambiguous
+    re.compile(rf"^\s*(?:hey|ok|okay)\s+({_ALIAS_RE})\b[,:]?\s+(.+)$", re.I | re.S),
+    # "grok: what time is it" — a bare name needs punctuation, or "local
+    # weather today" would route instead of being asked as a question
+    re.compile(rf"^\s*({_ALIAS_RE})\b\s*[,:]\s*(.+)$", re.I | re.S),
+)
 # "switch to grok", "use grok from now on" -> change the default
 _SWITCH_RE = re.compile(
     rf"^\s*(?:please\s+)?(?:switch|change)\s+(?:to|over to)\s+({_ALIAS_RE})\b"
@@ -46,6 +57,15 @@ _SWITCH_RE = re.compile(
     re.I)
 
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
+
+# Recording begins part-way through the wake word, so whisper transcribes a
+# fragment of it: "hey jarvis" has come through as "This", "Hey Jarvis",
+# "Jarvis" and "Charvis". Strip a leading greeting and/or wake-word-shaped
+# token so it never lands in the prompt sent to a model.
+_WAKE_RESIDUE_RE = re.compile(
+    r"^\s*(?:(?:hey|hi|hello|ok|okay|yo|this|that|the)\b[\s,.:!-]*)?"
+    r"(?:(?:jarvis|jarvi[sz]|charvis|travis|garvis|service|jervis)\b[\s,.:!-]*)?",
+    re.I)
 
 
 class LLMError(RuntimeError):
@@ -61,21 +81,35 @@ def normalize(text: str) -> str:
     return re.sub(r"\n{2,}", "\n", text).strip()
 
 
+def strip_wake_residue(text: str) -> str:
+    """Drop the wake word (and whatever whisper made of its clipped start) from
+    the front of an utterance."""
+    return _WAKE_RESIDUE_RE.sub("", text, count=1).lstrip(" ,.:;-").strip()
+
+
 def parse_route(text: str) -> tuple[str | None, str, bool]:
     """Return (backend, remaining_text, is_permanent_switch).
 
     backend is None when the utterance names no backend.
     """
-    m = _SWITCH_RE.match(text)
-    if m:
-        alias = (m.group(1) or m.group(2) or "").lower()
-        return ALIASES[alias], "", True
-    m = _ONE_SHOT_RE.match(text)
-    if m:
-        alias, rest = m.group(1).lower(), m.group(2).strip()
-        if rest:  # "grok" alone is not a question — ignore it
-            return ALIASES[alias], rest, False
-    return None, text, False
+    # Try the utterance as-is before stripping: "hey gpt tell me a joke" needs
+    # the greeting that residue-stripping would remove. Then try it stripped,
+    # for the "This asks Grock…" shape where junk precedes the real request.
+    stripped = strip_wake_residue(text)
+    for candidate in dict.fromkeys((text.strip(), stripped)):
+        if not candidate:
+            continue
+        m = _SWITCH_RE.search(candidate)
+        if m:
+            alias = (m.group(1) or m.group(2) or "").lower()
+            return ALIASES[alias], "", True
+        for pattern in _ONE_SHOT_PATTERNS:
+            m = pattern.search(candidate)
+            if m:
+                alias, rest = m.group(1).lower(), m.group(2).strip()
+                if rest:  # a backend name with no question is not a request
+                    return ALIASES[alias], rest, False
+    return None, stripped or text.strip(), False
 
 
 class Router:
