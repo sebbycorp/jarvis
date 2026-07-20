@@ -152,6 +152,48 @@ class TestOutputDevice(unittest.TestCase):
                           (5, "Device [USB Audio Device]")])
 
 
+class TestCompress(unittest.TestCase):
+    """Loudness is a nicety; audible output is the point. A missing or broken
+    sox must never silence the box."""
+
+    def test_disabled_returns_input_untouched(self):
+        with mock.patch.object(audio.config, "OUTPUT_COMPAND", False):
+            self.assertEqual(audio.compress(b"pcm", 22050), b"pcm")
+
+    def test_missing_sox_returns_input_untouched(self):
+        with mock.patch.object(audio.config, "OUTPUT_COMPAND", True), \
+             mock.patch.object(audio.shutil, "which", return_value=None):
+            self.assertEqual(audio.compress(b"pcm", 22050), b"pcm")
+
+    def test_sox_failure_falls_back_to_the_original(self):
+        with mock.patch.object(audio.config, "OUTPUT_COMPAND", True), \
+             mock.patch.object(audio.shutil, "which", return_value="/usr/bin/sox"), \
+             mock.patch.object(audio.subprocess, "run",
+                               return_value=mock.Mock(returncode=1, stdout=b"")):
+            self.assertEqual(audio.compress(b"pcm", 22050), b"pcm")
+
+    def test_empty_sox_output_falls_back(self):
+        with mock.patch.object(audio.config, "OUTPUT_COMPAND", True), \
+             mock.patch.object(audio.shutil, "which", return_value="/usr/bin/sox"), \
+             mock.patch.object(audio.subprocess, "run",
+                               return_value=mock.Mock(returncode=0, stdout=b"")):
+            self.assertEqual(audio.compress(b"pcm", 22050), b"pcm")
+
+    def test_sox_crash_is_swallowed(self):
+        with mock.patch.object(audio.config, "OUTPUT_COMPAND", True), \
+             mock.patch.object(audio.shutil, "which", return_value="/usr/bin/sox"), \
+             mock.patch.object(audio.subprocess, "run",
+                               side_effect=audio.subprocess.TimeoutExpired("sox", 30)):
+            self.assertEqual(audio.compress(b"pcm", 22050), b"pcm")
+
+    def test_processed_audio_is_returned_when_sox_succeeds(self):
+        with mock.patch.object(audio.config, "OUTPUT_COMPAND", True), \
+             mock.patch.object(audio.shutil, "which", return_value="/usr/bin/sox"), \
+             mock.patch.object(audio.subprocess, "run",
+                               return_value=mock.Mock(returncode=0, stdout=b"LOUD")):
+            self.assertEqual(audio.compress(b"pcm", 22050), b"LOUD")
+
+
 class TestPlayCommand(unittest.TestCase):
     def test_targets_the_configured_device(self):
         with mock.patch.object(audio, "output_device", return_value="plughw:5,0"), \

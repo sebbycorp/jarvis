@@ -29,13 +29,33 @@ has timed out`. Classic loose/failed CSI ribbon. Currently
 raising here — it hung preflight indefinitely — so `camera.py` time-bounds every
 call and latches a broken flag. Re-seat the ribbon at both ends to retry.
 
-**Speaker — output level unverified.** Every software layer reports success
-(`aplay` exits 0, Piper synthesizes, softvol and Master both at 100%, HAT amp
-enable returns True), and a mic loopback *does* show the speaker being heard —
-but only at **peak ~900/32767 (−31 dBFS)**, about 3x the noise floor. Either the
-speaker is quiet/damaged or the amp isn't driving properly. **Nobody has yet
-confirmed by ear whether it is audible in the room.** Do that before chasing it
-in software. Note this does not affect the mic→STT path, which is verified good.
+**Speaker — DEAD past the DAC.** Confirmed by ear 2026-07-20: totally silent,
+**not even hiss with an ear against the driver**. A powered amp normally has an
+audible noise floor, so zero hiss means the amplifier is unpowered or the
+speaker is disconnected. Everything upstream is proven working:
+
+| Checked | Result |
+|---|---|
+| DAC substream (`/proc/asound/card3/pcm0p/sub0/status`) | **RUNNING**, 48kHz S16_LE |
+| Amp enable GPIO20 (`pinctrl get 20`) | output, **hi** (toggles fine) |
+| Battery at HAT ADC A4 | **8.4V** |
+| softvol + Master | both 100% / 0dB |
+| `aplay` / `speaker-test` | exit 0, no errors |
+
+So: **stop debugging this in software.** Check the HAT's power switch (the amp
+runs off the battery rail, not the Pi's 5V — the ADC reads the battery *input*
+whether or not the switch passes it on), then the speaker's 2-pin header, then
+continuity across the driver (should be 4-8Ω). Resolution chosen: move to a
+powered USB speaker via `VOICEBOX_AUDIO_OUT`. None of this affects the mic→STT
+path, which is verified good.
+
+**Piper is quiet by nature.** It peaks at 0 dBFS but averages **-17.7 dBFS** —
+an 18 dB crest factor. Perceived loudness follows RMS, so it sounds faint on a
+small speaker even at full volume, and softvol has `max_dB 0.0` (it can only
+attenuate, never boost). `audio.compress()` runs sox compand to lift RMS to
+about **-12 dBFS** (~2x perceived loudness) without clipping peaks. Measured
+alternatives: plain `gain -n -1` made it *worse* (-18.7 dBFS) because
+normalising only scales the peaks; heavy compand landed at -13.5.
 
 ## Environment
 - OS: Debian 13 "Trixie", aarch64

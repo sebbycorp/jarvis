@@ -104,6 +104,10 @@ MIC_RATE = _i("VOICEBOX_MIC_RATE", 0)
 # (e.g. "USB Audio") or an explicit device ("plughw:5,0") to pin a specific
 # card — card indices drift across reboots, names don't.
 AUDIO_OUT = _s("VOICEBOX_AUDIO_OUT", "default")
+# Compress speech dynamics before playback (needs sox). Piper averages ~-18
+# dBFS despite peaking at 0; this lifts it ~6 dB so it carries on a small
+# speaker. Turn off if you have a good amp and prefer untouched dynamics.
+OUTPUT_COMPAND = _b("VOICEBOX_OUTPUT_COMPAND", True)
 PLAY_CMD = _s("VOICEBOX_PLAY_CMD", "")  # empty = build it from AUDIO_OUT
 # The SunFounder HAT needs GPIO20 raised to power its amplifier. Harmless to
 # leave on with other hardware, but turn it off if you drop the HAT entirely.

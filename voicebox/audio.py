@@ -200,12 +200,36 @@ def play_command(rate: int, channels: int = 1) -> list[str]:
             "-r", str(rate), "-f", "S16_LE", "-c", str(channels), "-"]
 
 
+# Piper's speech already peaks at 0 dBFS but averages about -18 dBFS — an 18 dB
+# crest factor. Perceived loudness tracks RMS, not peaks, which is why it sounds
+# quiet on a small speaker even at full volume. Compressing the dynamic range
+# lifts RMS ~6 dB (roughly double the loudness) without clipping the peaks.
+# Measured on this box: -17.7 -> -12.0 dBFS.
+COMPAND = ["compand", "0.3,1", "6:-70,-60,-20", "-5", "-90", "0.2",
+           "gain", "-n", "-1"]
+
+
+def compress(pcm: bytes, rate: int, channels: int = 1) -> bytes:
+    """Raise perceived loudness via sox. Returns the input unchanged if sox is
+    missing or the filter fails — louder is a nicety, audible is the point."""
+    if not config.OUTPUT_COMPAND or not pcm or not shutil.which("sox"):
+        return pcm
+    raw = ["-t", "raw", "-r", str(rate), "-e", "signed", "-b", "16",
+           "-c", str(channels)]
+    try:
+        out = subprocess.run(["sox", *raw, "-", *raw, "-", *COMPAND],
+                             input=pcm, capture_output=True, timeout=30)
+    except subprocess.SubprocessError:
+        return pcm
+    return out.stdout if out.returncode == 0 and out.stdout else pcm
+
+
 def play_pcm(pcm: bytes, rate: int = config.SAMPLE_RATE) -> None:
     """Play raw signed-16 mono PCM through the configured output device."""
     if not pcm:
         return
     enable_speaker()
-    subprocess.run(play_command(rate), input=pcm, check=False,
+    subprocess.run(play_command(rate), input=compress(pcm, rate), check=False,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
