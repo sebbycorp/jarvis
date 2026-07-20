@@ -22,10 +22,13 @@ history before the `voicebox` branch.
 
 ### Open hardware issues (2026-07-20)
 
-**Camera — no frames.** The OV5647 is detected on I2C and libcamera configures
-streams, then: `Dequeue timer of 1000000.00us has expired` → `Camera frontend
-has timed out`. Classic loose/failed CSI ribbon. Currently
-`VOICEBOX_CAMERA_ENABLED=0`. Worse, picamera2 **blocks forever** rather than
+**Camera — no frames.** Re-tested 2026-07-20 after hardware handling; still
+broken. `rpicam-hello --list-cameras` enumerates the OV5647 and all four modes,
+so the **I2C control lines are fine** — but capture gives `Dequeue timer of
+1000000.00us has expired` → `Camera frontend has timed out`. Control works,
+data doesn't: that isolates the fault to the ribbon's **data lanes** (unseated,
+inserted backwards, or damaged) rather than the sensor or the Pi. A replacement
+CSI cable is the fix. Currently `VOICEBOX_CAMERA_ENABLED=0`. Worse, picamera2 **blocks forever** rather than
 raising here — it hung preflight indefinitely — so `camera.py` time-bounds every
 call and latches a broken flag. Re-seat the ribbon at both ends to retry.
 
@@ -128,6 +131,12 @@ occurred historically (not active). If STT times regress, check this first.
   voice's own sample rate — read it from the sidecar `.onnx.json`, don't assume
   22050.
 - **Wake word:** openWakeWord (`hey_jarvis`) on onnxruntime, 1280-sample chunks.
+  **Threshold 0.85, measured not guessed.** In this room a real "hey Jarvis"
+  scores **0.97**, while background speech (TV) sneaks through at **0.70-0.85** —
+  0.5 and 0.7 both produced regular false triggers that transcribed several
+  seconds of television and sent it to a model. 0.85 sits in the gap. Each
+  trigger logs its score (`👂 listening… (wake 0.97)`) so this can be re-tuned
+  from data if the room changes.
 - Mic frames are 20 ms / 320 samples: a valid webrtcvad frame size, and exactly
   1/4 of openWakeWord's chunk.
 

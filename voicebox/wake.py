@@ -25,6 +25,7 @@ class WakeWord:
         self._buf = np.empty(0, dtype=np.int16)
         self._model = None
         self.available = False
+        self.last_score = 0.0
         if not config.WAKE_ENABLED:
             return
         try:
@@ -58,13 +59,21 @@ class WakeWord:
         return best
 
     def wait(self, frames: Iterator[bytes]) -> bool:
-        """Block until the wake word fires. Returns False if the stream ends."""
+        """Block until the wake word fires. Returns False if the stream ends.
+
+        `last_score` holds the triggering score — log it when tuning: a genuine
+        wake word usually scores well above 0.9, while background speech that
+        sneaks past sits just over the threshold.
+        """
+        self.last_score = 0.0
         if self._model is None:
             next(frames, None)
             return True
         self.reset()
         for frame in frames:
-            if self.detect(frame) >= self.threshold:
+            score = self.detect(frame)
+            if score >= self.threshold:
+                self.last_score = score
                 self.reset()
                 return True
         return False

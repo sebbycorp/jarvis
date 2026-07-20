@@ -125,7 +125,7 @@ class Assistant:
                     mic.flush()
                     if not self.wake.wait(frames):
                         break
-                    print("👂 listening…")
+                    print(f"👂 listening… (wake {self.wake.last_score:.2f})")
                     pcm = self.recorder.record(frames)
                     if not pcm:
                         continue
