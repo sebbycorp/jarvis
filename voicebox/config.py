@@ -58,6 +58,10 @@ DEFAULT_BACKEND = _s("VOICEBOX_DEFAULT_BACKEND", "local")
 LLM_TIMEOUT = _f("VOICEBOX_LLM_TIMEOUT", 60.0)
 MAX_TOKENS = _i("VOICEBOX_MAX_TOKENS", 400)
 HISTORY_TURNS = _i("VOICEBOX_HISTORY_TURNS", 6)
+# Let the model call tools (music, camera, volume) instead of relying on regex
+# intent matching. Costs an extra gateway round trip per call.
+TOOLS_ENABLED = _b("VOICEBOX_TOOLS_ENABLED", True)
+MAX_TOOL_ROUNDS = _i("VOICEBOX_MAX_TOOL_ROUNDS", 3)
 
 # Qwen is a reasoning model: left alone it spends the whole token budget
 # thinking and returns empty `content`. A voice assistant wants the answer, not
@@ -192,7 +196,11 @@ SYSTEM_PROMPT = _s(
     f"You are {WAKE_NAME}, the household AI. You address the user as 'sir'. "
     "Your manner is formal, understated and unflappable: you report rather than "
     "chat, you never gush, and you allow yourself the occasional dry aside. "
-    "Confirm actions briefly ('Certainly, sir.') rather than narrating them. "
+    "You have tools. You MUST call the matching tool to play music, change the "
+    "volume, or look through the camera — never claim to have done any of "
+    "those things unless the tool call actually succeeded. If a tool reports "
+    "an error, say plainly what failed. Confirm real actions briefly "
+    "('Certainly, sir.'), but never confirm one you did not perform. "
     "Your replies are spoken aloud, so keep them to one or two sentences unless "
     "asked for detail. Never use markdown, bullet points, emoji, or code blocks. "
     "Spell out numbers and units the way a person says them.",

@@ -37,6 +37,11 @@ MUSIC_SKIP_RE = re.compile(r"\b(next|skip)\b.*\b(track|song)\b|^\s*(next|skip)\s
 VOLUME_RE = re.compile(r"\b(?:set\s+)?volume\s+(?:to\s+)?(\d{1,3})\b|"
                        r"\b(turn it |turn the volume )?(up|down)\b.*\bvolume\b|"
                        r"\bvolume\s+(up|down)\b", re.I)
+# Qualifiers that mean the request needs reasoning, not pattern matching.
+COMPLEX_RE = re.compile(r"\b(and|but|then|except|without|skip|under|over|"
+                        r"longer|shorter|mellow|upbeat|something like|similar|"
+                        r"instead|unless|no more than|less than)\b", re.I)
+
 RESET_RE = re.compile(r"^\s*(?:forget|reset|clear)\b.*\b(context|history|conversation|that)\b",
                       re.I)
 
@@ -83,8 +88,14 @@ class Assistant:
                 return "I couldn't change the volume."
             return f"Volume {self._volume} percent."
 
+        # Fast-path only the simple phrasings. Anything with qualifiers
+        # ("play something mellow but skip the long ones") goes to the model,
+        # which can actually reason about it — that is the whole point of
+        # having tools. Local Qwen is less reliable at tool calls than the
+        # cloud backends (it misses stop_music), which is the other reason
+        # these direct matches stay.
         m = MUSIC_PLAY_RE.match(text)
-        if m and not VISION_RE.search(text):
+        if m and not VISION_RE.search(text) and not COMPLEX_RE.search(text):
             query = m.group(1).strip().rstrip(".?!")
             shuffle = bool(re.search(r"\b(shuffle|random|anything|music)\b", query, re.I))
             if re.fullmatch(r"(some\s+)?music|anything|something", query, re.I):
@@ -107,8 +118,10 @@ class Assistant:
             print(f"⚠️  {e}")
             return "Sorry, I couldn't reach the model gateway."
         if not result["switched"]:
+            used = result.get("tools_used") or []
             print(f"   ↳ via {self.router.label(result['backend'])}"
-                  f"{' + vision' if result['saw_image'] else ''}")
+                  f"{' + vision' if result['saw_image'] else ''}"
+                  f"{' + tools: ' + ','.join(dict.fromkeys(used)) if used else ''}")
         return result["reply"]
 
     # ---- the loop ----------------------------------------------------------

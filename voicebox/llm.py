@@ -14,6 +14,7 @@ default until told otherwise.
 """
 from __future__ import annotations
 import base64
+import json
 import re
 import threading
 
@@ -144,7 +145,8 @@ class Router:
 
     # ---- the one call that matters ----------------------------------------
     def ask(self, text: str, image_jpeg: bytes | None = None,
-            backend: str | None = None, remember: bool = True) -> dict:
+            backend: str | None = None, remember: bool = True,
+            use_tools: bool | None = None) -> dict:
         """Send `text` (+ optional camera frame) and return the spoken reply."""
         route, stripped, permanent = parse_route(text)
         if permanent and route:
@@ -173,12 +175,14 @@ class Router:
         messages += history
         messages.append({"role": "user", "content": content})
 
-        payload = {"messages": messages, "max_tokens": config.MAX_TOKENS,
-                   # empty model = let the gateway substitute its pinned one
-                   "model": cfg["model"]}
-        payload.update(cfg.get("extra") or {})
+        if use_tools is None:
+            use_tools = config.TOOLS_ENABLED
+        tool_schemas = None
+        if use_tools:
+            import tools
+            tool_schemas = tools.schemas()
 
-        reply = self._post(config.backend_url(name), payload, name)
+        reply, called = self._converse(name, cfg, messages, tool_schemas)
 
         if remember:
             with self._lock:
@@ -191,9 +195,64 @@ class Router:
                     del self._history[:-keep]
 
         return {"backend": name, "text": prompt, "reply": reply,
-                "switched": False, "saw_image": bool(image_jpeg and cfg["vision"])}
+                "switched": False, "tools_used": called,
+                "saw_image": bool(image_jpeg and cfg["vision"])}
 
-    def _post(self, url: str, payload: dict, name: str) -> str:
+    def _converse(self, name: str, cfg: dict, messages: list,
+                  tool_schemas: list | None) -> tuple[str, list[str]]:
+        """Exchange with the model, running any tools it asks for.
+
+        Bounded by MAX_TOOL_ROUNDS: a model that keeps calling tools without
+        producing an answer would otherwise loop until the user gives up.
+        """
+        called: list[str] = []
+        url = config.backend_url(name)
+        for _ in range(max(1, config.MAX_TOOL_ROUNDS)):
+            payload = {"messages": messages, "max_tokens": config.MAX_TOKENS,
+                       # empty model = let the gateway substitute its pinned one
+                       "model": cfg["model"]}
+            payload.update(cfg.get("extra") or {})
+            if tool_schemas:
+                payload["tools"] = tool_schemas
+
+            msg = self._post(url, payload, name)
+            calls = msg.get("tool_calls") or []
+            if not calls:
+                return self._content(msg, name), called
+
+            import tools
+            messages.append({k: v for k, v in msg.items()
+                             if k in ("role", "content", "tool_calls")})
+            for call in calls:
+                fn = call.get("function", {})
+                tool_name = fn.get("name", "")
+                called.append(tool_name)
+                result = tools.dispatch(tool_name, fn.get("arguments", "{}"))
+                messages.append({"role": "tool",
+                                 "tool_call_id": call.get("id", tool_name),
+                                 "name": tool_name,
+                                 "content": json.dumps(result)[:2000]})
+            # drop the tools on the last round so it has to answer in words
+            tool_schemas = tool_schemas if len(called) < 6 else None
+
+        # ran out of rounds — report what was done rather than nothing
+        if called:
+            return f"Done: {', '.join(dict.fromkeys(called))}.", called
+        raise LLMError(f"{name} kept calling tools without answering")
+
+    @staticmethod
+    def _content(msg: dict, name: str) -> str:
+        # Reasoning models (Qwen on vLLM, Grok) split thinking from the answer
+        # and may leave `content` empty when the answer got truncated.
+        out = normalize(msg.get("content") or "")
+        if not out:
+            out = normalize(msg.get("reasoning_content")
+                            or msg.get("reasoning") or "")
+        if not out:
+            raise LLMError(f"{name} returned an empty reply")
+        return out
+
+    def _post(self, url: str, payload: dict, name: str) -> dict:
         try:
             r = requests.post(url, json=payload,
                               headers={"content-type": "application/json"},
@@ -204,19 +263,10 @@ class Router:
             raise LLMError(f"{name} gateway returned {r.status_code}: "
                            f"{r.text[:200]}")
         try:
-            msg = r.json()["choices"][0]["message"]
+            return r.json()["choices"][0]["message"]
         except (ValueError, KeyError, IndexError) as e:
             raise LLMError(f"{name} sent an unexpected response: "
                            f"{r.text[:200]}") from e
-        # Reasoning models (Qwen on vLLM, Grok) split thinking from the answer
-        # and may leave `content` empty when the answer got truncated.
-        out = normalize(msg.get("content") or "")
-        if not out:
-            out = normalize(msg.get("reasoning_content")
-                            or msg.get("reasoning") or "")
-        if not out:
-            raise LLMError(f"{name} returned an empty reply")
-        return out
 
 
 _router: Router | None = None

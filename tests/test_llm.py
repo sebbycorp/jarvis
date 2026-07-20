@@ -206,3 +206,92 @@ class TestRouterAsk(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestToolCalling(unittest.TestCase):
+    """Tool calls must actually run, and a model that loops must be stopped."""
+
+    def setUp(self):
+        self.router = llm.Router("local")
+
+    @staticmethod
+    def _tool_msg(name, args='{}'):
+        return {"choices": [{"message": {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": name, "arguments": args}}]}}]}
+
+    def test_a_tool_call_is_executed_and_the_result_fed_back(self):
+        import tools
+        with mock.patch.object(tools, "dispatch",
+                               return_value={"playing": "song.mp3"}) as d, \
+             mock.patch.object(llm.requests, "post", side_effect=[
+                 mocks.FakeResponse(self._tool_msg("play_music", '{"query":"x"}')),
+                 mocks.FakeResponse(mocks.chat_response("Playing it now."))]) as post:
+            out = self.router.ask("play x", remember=False)
+
+        d.assert_called_once_with("play_music", '{"query":"x"}')
+        self.assertEqual(out["tools_used"], ["play_music"])
+        self.assertEqual(out["reply"], "Playing it now.")
+        # the tool result must reach the model on the second call
+        followup = post.call_args_list[1].kwargs["json"]["messages"]
+        self.assertEqual(followup[-1]["role"], "tool")
+        self.assertIn("song.mp3", followup[-1]["content"])
+
+    def test_tools_are_offered_to_the_model(self):
+        with mock.patch.object(llm.requests, "post",
+                               return_value=mocks.FakeResponse(
+                                   mocks.chat_response("hi"))) as post:
+            self.router.ask("hello", remember=False)
+        self.assertTrue(post.call_args.kwargs["json"]["tools"])
+
+    def test_tools_can_be_disabled_per_call(self):
+        with mock.patch.object(llm.requests, "post",
+                               return_value=mocks.FakeResponse(
+                                   mocks.chat_response("hi"))) as post:
+            self.router.ask("hello", remember=False, use_tools=False)
+        self.assertNotIn("tools", post.call_args.kwargs["json"])
+
+    def test_a_looping_model_is_cut_off(self):
+        # never answers, only calls tools — must terminate, not hang
+        import tools
+        with mock.patch.object(tools, "dispatch", return_value={"ok": True}), \
+             mock.patch.object(llm.requests, "post",
+                               return_value=mocks.FakeResponse(
+                                   self._tool_msg("get_status"))):
+            out = self.router.ask("status", remember=False)
+        self.assertTrue(out["tools_used"])
+        self.assertIn("Done", out["reply"])
+
+    def test_no_tool_call_means_no_tools_used(self):
+        with mock.patch.object(llm.requests, "post",
+                               return_value=mocks.FakeResponse(
+                                   mocks.chat_response("Lima."))):
+            out = self.router.ask("capital of peru", remember=False)
+        self.assertEqual(out["tools_used"], [])
+
+
+class TestToolDispatch(unittest.TestCase):
+    def setUp(self):
+        import tools
+        self.tools = tools
+
+    def test_unknown_tool_reports_rather_than_raising(self):
+        self.assertIn("error", self.tools.dispatch("nope", "{}"))
+
+    def test_bad_json_arguments_report_rather_than_raising(self):
+        self.assertIn("error", self.tools.dispatch("set_volume", "{not json"))
+
+    def test_wrong_arguments_report_rather_than_raising(self):
+        self.assertIn("error", self.tools.dispatch("set_volume", '{"nope":1}'))
+
+    def test_a_failing_handler_is_reported_to_the_model(self):
+        with mock.patch.dict(self.tools._REGISTRY["get_status"],
+                             {"handler": mock.Mock(side_effect=RuntimeError("boom"))}):
+            self.assertIn("boom", self.tools.dispatch("get_status", "{}")["error"])
+
+    def test_every_registered_tool_has_a_usable_schema(self):
+        for schema in self.tools.schemas():
+            fn = schema["function"]
+            self.assertTrue(fn["name"] and fn["description"])
+            self.assertEqual(fn["parameters"]["type"], "object")
