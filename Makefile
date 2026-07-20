@@ -44,6 +44,21 @@ status: ## Show backend, audio engines, and music state
 devices: ## List audio input devices on the Pi
 	ssh $(PI) "cd $(APP) && $(VENV) assistant.py --list-devices"
 
+speaker-test: ## Loop a test tone until Ctrl-C (for poking at the speaker wiring)
+	@echo "Looping 440Hz on the HAT speaker. Ctrl-C to stop."
+	ssh -t $(PI) 'amixer -c 3 -M sset "robot-hat speaker" 100% >/dev/null 2>&1; \
+	  pinctrl set 20 op dh 2>/dev/null; \
+	  speaker-test -D default -t sine -f 440 -c 1'
+
+audio-diag: ## Dump the full speaker signal chain (amp pin, battery, DAC state)
+	ssh $(PI) 'echo "amp enable (GPIO20):"; pinctrl get 20; \
+	  echo "softvol:"; amixer -c 3 sget "robot-hat speaker" | tail -1; \
+	  echo "battery:"; python3 -c "from robot_hat import ADC; \
+	    print(round(ADC(\"A4\").read()/4095*3.3*3, 2), \"V\")"; \
+	  echo "DAC while playing:"; \
+	  (timeout 3 speaker-test -D hw:3,0 -t sine -c 2 >/dev/null 2>&1 &) ; sleep 1; \
+	  grep -E "^state" /proc/asound/card3/pcm0p/sub0/status'
+
 say: ## Speak text through the box: make say TEXT="hello there"
 	ssh $(PI) "cd $(APP) && $(VENV) -c 'import tts,sys; print(tts.say(sys.argv[1]))' \"$(TEXT)\""
 
