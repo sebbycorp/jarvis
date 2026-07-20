@@ -100,7 +100,13 @@ MIC_DEVICE = os.environ.get("VOICEBOX_MIC_DEVICE") or None
 # 0 = probe the device for a rate it supports. The USB PnP mic on this box
 # rejects 16 kHz, so capture runs at 48 kHz and audio.py downsamples.
 MIC_RATE = _i("VOICEBOX_MIC_RATE", 0)
-PLAY_CMD = _s("VOICEBOX_PLAY_CMD", "aplay -q -r {rate} -f S16_LE -c 1 -")
+# ALSA output device. "default" follows /etc/asound.conf; set a name fragment
+# (e.g. "USB Audio") or an explicit device ("plughw:5,0") to pin a specific
+# card — card indices drift across reboots, names don't.
+AUDIO_OUT = _s("VOICEBOX_AUDIO_OUT", "default")
+PLAY_CMD = _s("VOICEBOX_PLAY_CMD", "")  # empty = build it from AUDIO_OUT
+# The SunFounder HAT needs GPIO20 raised to power its amplifier. Harmless to
+# leave on with other hardware, but turn it off if you drop the HAT entirely.
 ENABLE_HAT_SPEAKER = _b("VOICEBOX_ENABLE_HAT_SPEAKER", True)
 
 # ---- wake word -------------------------------------------------------------

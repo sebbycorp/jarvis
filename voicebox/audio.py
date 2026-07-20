@@ -1,12 +1,19 @@
 """Microphone capture and speaker playback.
 
-Output goes to the Robot HAT's hifiberry DAC (the board is still installed even
-though the legs are gone); `enable_speaker` toggles the HAT's amplifier pin.
 Capture is a single shared 16 kHz mono int16 stream that both the wake-word
 detector and the utterance recorder read from, so the mic is only opened once.
+
+Output goes to whatever `VOICEBOX_AUDIO_OUT` names — "default", an explicit
+ALSA device, or a fragment of a card name (preferred; card indices drift across
+reboots). Everything, including music, is decoded to raw PCM and piped to one
+`aplay` invocation, so there is a single place to point at new hardware.
+`enable_speaker()` raises the SunFounder HAT's amp pin and is a harmless no-op
+on other hardware.
 """
 from __future__ import annotations
+import re
 import shlex
+import shutil
 import subprocess
 import threading
 from collections import deque
@@ -157,24 +164,100 @@ class Microphone:
             self._event.wait(timeout=0.5)
 
 
+def output_device() -> str:
+    """Resolve config.AUDIO_OUT to an ALSA device string.
+
+    Accepts "default", an explicit device ("plughw:5,0"), or a fragment of a
+    card name ("USB Audio") — the last is preferred, because card indices move
+    between reboots but names don't.
+    """
+    want = config.AUDIO_OUT.strip()
+    if not want or want == "default":
+        return "default"
+    if re.match(r"^(default|sysdefault|plug|hw|dmix|null)[:_]?", want):
+        return want
+    for index, name in output_cards():
+        if want.lower() in name.lower():
+            return f"plughw:{index},0"
+    return want  # let ALSA report the error rather than guessing
+
+
+def output_cards() -> list[tuple[int, str]]:
+    """(card index, description) for every playback card, from `aplay -l`."""
+    if not shutil.which("aplay"):
+        return []
+    out = subprocess.run(["aplay", "-l"], capture_output=True, text=True)
+    if out.returncode != 0:
+        return []
+    return [(int(m.group(1)), m.group(2))
+            for m in re.finditer(r"^card (\d+): (.+?),", out.stdout, re.M)]
+
+
+def play_command(rate: int, channels: int = 1) -> list[str]:
+    if config.PLAY_CMD:  # explicit override wins
+        return shlex.split(config.PLAY_CMD.format(rate=rate))
+    return ["aplay", "-q", "-D", output_device(),
+            "-r", str(rate), "-f", "S16_LE", "-c", str(channels), "-"]
+
+
 def play_pcm(pcm: bytes, rate: int = config.SAMPLE_RATE) -> None:
-    """Play raw signed-16 mono PCM through the configured output command."""
+    """Play raw signed-16 mono PCM through the configured output device."""
     if not pcm:
         return
     enable_speaker()
-    cmd = shlex.split(config.PLAY_CMD.format(rate=rate))
-    subprocess.run(cmd, input=pcm, check=False,
+    subprocess.run(play_command(rate), input=pcm, check=False,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def play_file(path: str) -> subprocess.Popen:
-    """Play an audio file (mp3/wav/flac). Returns the process so it can be
+class Playback:
+    """A decode|play pipeline, stoppable as a unit.
+
+    ffplay picks its own output device and is awkward to point at a specific
+    ALSA card, so files are decoded by ffmpeg and piped to the same aplay
+    device everything else uses — one output path, one place to configure.
+    """
+
+    def __init__(self, path: str, rate: int = 44100, channels: int = 2):
+        self._decode = subprocess.Popen(
+            ["ffmpeg", "-loglevel", "quiet", "-i", path,
+             "-f", "s16le", "-ar", str(rate), "-ac", str(channels), "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self._play = subprocess.Popen(
+            play_command(rate, channels), stdin=self._decode.stdout,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # let the decoder see SIGPIPE if playback dies first
+        if self._decode.stdout:
+            self._decode.stdout.close()
+
+    def poll(self):
+        return self._play.poll()
+
+    def wait(self, timeout: float | None = None):
+        return self._play.wait(timeout=timeout)
+
+    def terminate(self) -> None:
+        for p in (self._play, self._decode):
+            if p.poll() is None:
+                p.terminate()
+
+    def kill(self) -> None:
+        for p in (self._play, self._decode):
+            if p.poll() is None:
+                p.kill()
+
+
+def play_file(path: str) -> Playback:
+    """Play an audio file (mp3/wav/flac). Returns a handle so it can be
     stopped — used by the music player."""
     enable_speaker()
-    return subprocess.Popen(
-        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return Playback(path)
 
 
 def list_devices() -> str:
-    return str(sd.query_devices())
+    lines = ["--- inputs (sounddevice) ---", str(sd.query_devices()),
+             "", "--- outputs (aplay -l) ---"]
+    for index, name in output_cards():
+        lines.append(f"  card {index}: {name}")
+    lines.append(f"\nVOICEBOX_AUDIO_OUT={config.AUDIO_OUT!r} "
+                 f"-> {output_device()}")
+    return "\n".join(lines)

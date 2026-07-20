@@ -28,7 +28,7 @@ model backends you can switch between by voice.
                     │   :31397 /grok   → grok-4.5             │
                     └──────────────────────┬──────────────────┘
                                            ▼
-                       piper (TTS) → HAT hifiberry DAC → speaker
+                          piper (TTS) → aplay → speaker
 ```
 
 **Speech never leaves the Pi.** The gateway proxies `/chat/completions` only — no
@@ -103,7 +103,8 @@ make logs          # follow the service logs
 make ask Q="..."   # one text turn, no mic — quickest way to test the gateway
 make say TEXT="hi" # speak something through the box
 make gateway       # check all three model routes from your laptop
-make devices       # list audio inputs (to set VOICEBOX_MIC_DEVICE)
+make devices       # list audio in/out devices + the resolved output
+make audio-diag    # dump the speaker signal chain (amp pin, volume, DAC state)
 make stop-all      # free the mic/speaker
 ```
 
@@ -150,9 +151,24 @@ The real `.env` is git-ignored and excluded from `deploy.sh`.
 
 ## Troubleshooting
 
+### Changing the speaker
+
+Output is one config line — `make devices` lists what's plugged in:
+
+```bash
+VOICEBOX_AUDIO_OUT=USB Audio    # match a card NAME (survives reindexing)
+VOICEBOX_AUDIO_OUT=plughw:5,0   # or pin an explicit ALSA device
+VOICEBOX_ENABLE_HAT_SPEAKER=0   # if you're not using the SunFounder HAT
+```
+
+Prefer the name form: card indices move between reboots, names don't. Speech
+and music both go through the same `aplay` device, so this is the only knob.
+
+### Common problems
+
 | Symptom | Cause / fix |
 |---|---|
-| Silent box | HAT amp not enabled — `sudo bash ~/sf/robot-hat/i2samp.sh`, reboot |
+| Silent box | See `make audio-diag`. If the DAC shows RUNNING and you still hear nothing, the fault is past the DAC — amp or speaker |
 | `piper: not found` | Re-run `make setup`; falls back to espeak meanwhile |
 | "couldn't reach the model gateway" | `make gateway` — check AgentGateway on `172.16.10.155` |
 | Camera errors | venv must be `--system-site-packages` (system picamera2) |

@@ -108,5 +108,70 @@ class TestFrameSize(unittest.TestCase):
             self.assertEqual(len(frame), audio.FRAME_SAMPLES * 2)
 
 
+APLAY_L = """**** List of PLAYBACK Hardware Devices ****
+card 0: vc4hdmi0 [vc4-hdmi-0], device 0: MAI PCM i2s-hifi-0 []
+card 2: Headphones [bcm2835 Headphones], device 0: bcm2835 Headphones []
+card 3: sndrpihifiberry [snd_rpi_hifiberry_dac], device 0: HifiBerry DAC HiFi []
+card 5: Device [USB Audio Device], device 0: USB Audio []
+"""
+
+
+class TestOutputDevice(unittest.TestCase):
+    def setUp(self):
+        mock.patch.object(audio.shutil, "which",
+                          return_value="/usr/bin/aplay").start()
+        mock.patch.object(audio.subprocess, "run",
+                          return_value=mock.Mock(returncode=0, stdout=APLAY_L)).start()
+        self.addCleanup(mock.patch.stopall)
+
+    def _resolve(self, value):
+        with mock.patch.object(audio.config, "AUDIO_OUT", value):
+            return audio.output_device()
+
+    def test_default_passes_through(self):
+        self.assertEqual(self._resolve("default"), "default")
+        self.assertEqual(self._resolve(""), "default")
+
+    def test_explicit_alsa_device_is_used_verbatim(self):
+        self.assertEqual(self._resolve("plughw:5,0"), "plughw:5,0")
+        self.assertEqual(self._resolve("hw:3,0"), "hw:3,0")
+
+    def test_a_card_name_resolves_to_its_index(self):
+        # the point of naming: a USB speaker keeps working when its index moves
+        self.assertEqual(self._resolve("USB Audio"), "plughw:5,0")
+        self.assertEqual(self._resolve("hifiberry"), "plughw:3,0")
+
+    def test_name_match_is_case_insensitive(self):
+        self.assertEqual(self._resolve("usb audio"), "plughw:5,0")
+
+    def test_cards_are_parsed_from_aplay(self):
+        self.assertEqual(audio.output_cards(),
+                         [(0, "vc4hdmi0 [vc4-hdmi-0]"),
+                          (2, "Headphones [bcm2835 Headphones]"),
+                          (3, "sndrpihifiberry [snd_rpi_hifiberry_dac]"),
+                          (5, "Device [USB Audio Device]")])
+
+
+class TestPlayCommand(unittest.TestCase):
+    def test_targets_the_configured_device(self):
+        with mock.patch.object(audio, "output_device", return_value="plughw:5,0"), \
+             mock.patch.object(audio.config, "PLAY_CMD", ""):
+            cmd = audio.play_command(22050)
+        self.assertIn("-D", cmd)
+        self.assertEqual(cmd[cmd.index("-D") + 1], "plughw:5,0")
+        self.assertEqual(cmd[cmd.index("-r") + 1], "22050")
+
+    def test_explicit_play_cmd_overrides_everything(self):
+        with mock.patch.object(audio.config, "PLAY_CMD", "paplay --rate={rate}"):
+            self.assertEqual(audio.play_command(48000),
+                             ["paplay", "--rate=48000"])
+
+    def test_stereo_channel_count_is_passed(self):
+        with mock.patch.object(audio.config, "PLAY_CMD", ""), \
+             mock.patch.object(audio, "output_device", return_value="default"):
+            cmd = audio.play_command(44100, channels=2)
+        self.assertEqual(cmd[cmd.index("-c") + 1], "2")
+
+
 if __name__ == "__main__":
     unittest.main()
